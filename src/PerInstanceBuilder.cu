@@ -22,18 +22,18 @@ __shared__ volatile int* global_ids[2];
 __shared__ int* global_block_scan;
 __shared__ PrimitiveID* global_prim_ids;
 
-__device__ static float get(float3& f, int i)
+__device__ static float Get(float3& f, int i)
 {
     return i == 0 ? f.x : i == 1 ? f.y : f.z;
 }
 
-__device__ static void reset(AABB& a)
+__device__ static void Reset(AABB& a)
 {
     a.min = make_float3(FLT_MAX);
     a.max = make_float3(-FLT_MAX);
 }
 
-__device__ static Bin combine(const Bin& a, const Bin& b)
+__device__ static Bin Combine(const Bin& a, const Bin& b)
 {
     Bin r;
     r.c_aabb = Combine(a.c_aabb, b.c_aabb);
@@ -42,7 +42,7 @@ __device__ static Bin combine(const Bin& a, const Bin& b)
     return r;
 }
 
-__device__ static void initialise(PrimitiveID* prim_ids, Node* nodes,
+__device__ static void Initialise(PrimitiveID* prim_ids, Node* nodes,
                                   AABB* aabbs, int* scratch, Task* task_queue,
                                   AABB* c_aabbs, AABB* p_aabbs,
                                   int* block_counts, int* block_scan,
@@ -72,13 +72,13 @@ __device__ static void initialise(PrimitiveID* prim_ids, Node* nodes,
     }
 }
 
-__device__ static Task setup_task()
+__device__ static Task SetupTask()
 {
     unsigned id = atomicAdd(&shared_queue_size, -1);
     return global_task_queue[id - 1];
 }
 
-__device__ static int select_axis(AABB& aabb)
+__device__ static int SelectAxis(AABB& aabb)
 {
     float3 length = aabb.max - aabb.min;
     int result = 0;
@@ -87,11 +87,11 @@ __device__ static int select_axis(AABB& aabb)
     return result;
 }
 
-__device__ static void bin_centroids(Task& task, Bin bins[NUM_BINS], int axis)
+__device__ static void BinCentroids(Task& task, Bin bins[NUM_BINS], int axis)
 {
     float epsilon = 1.1920929e-7;  // 2^-23
     float k1 = NUM_BINS * (1 - epsilon) /
-               (get(task.c_aabb.max, axis) - get(task.c_aabb.min, axis));
+               (Get(task.c_aabb.max, axis) - Get(task.c_aabb.min, axis));
 
     unsigned start = task.start;
     unsigned end = task.end;
@@ -100,7 +100,7 @@ __device__ static void bin_centroids(Task& task, Bin bins[NUM_BINS], int axis)
     for (unsigned i = start; i < end; i++) {
         AABB& aabb = global_aabbs[global_ids[task.buffer_idx][i]];
         float3 centre = (aabb.min + aabb.max) * 0.5f;
-        int bin_id = int(k1 * (get(centre, axis) - get(c_aabb.min, axis)));
+        int bin_id = int(k1 * (Get(centre, axis) - Get(c_aabb.min, axis)));
 
         bins[bin_id].p_aabb.min.x =
             fminf(bins[bin_id].p_aabb.min.x, aabb.min.x);
@@ -126,8 +126,8 @@ __device__ static void bin_centroids(Task& task, Bin bins[NUM_BINS], int axis)
     }
 }
 
-__device__ static int select_plane(Task& task, Bin bin[NUM_BINS],
-                                   AABB child_p_aabb[2], AABB child_c_aabb[2])
+__device__ static int SelectPlane(Task& task, Bin bin[NUM_BINS],
+                                  AABB child_p_aabb[2], AABB child_c_aabb[2])
 {
     int result = 0;
     Bin l2r[NUM_BINS - 1];
@@ -138,7 +138,7 @@ __device__ static int select_plane(Task& task, Bin bin[NUM_BINS],
 
     // Linear pass left to right summing surface area
     for (int i = 1; i < NUM_BINS - 1; i++) {
-        l2r[i] = combine(l2r[i - 1], bin[i]);
+        l2r[i] = Combine(l2r[i - 1], bin[i]);
     }
 
     // Linear pass right to left summing surface area
@@ -156,17 +156,17 @@ __device__ static int select_plane(Task& task, Bin bin[NUM_BINS],
             child_c_aabb[1] = r2l.c_aabb;
         }
 
-        r2l = combine(r2l, bin[i]);
+        r2l = Combine(r2l, bin[i]);
     }
 
     return result;
 }
 
-__device__ static int partition_ids(Task task, int axis, int plane)
+__device__ static int PartitionIds(Task task, int axis, int plane)
 {
     float epsilon = 1.1920929e-7;  // 2^-23
     float k1 = NUM_BINS * (1 - epsilon) /
-               (get(task.c_aabb.max, axis) - get(task.c_aabb.min, axis));
+               (Get(task.c_aabb.max, axis) - Get(task.c_aabb.min, axis));
     int in_buf = task.buffer_idx;
     int out_buf = in_buf ^ 1;
 
@@ -177,7 +177,7 @@ __device__ static int partition_ids(Task task, int axis, int plane)
     for (unsigned i = task.start; i < task.end; i++) {
         AABB& aabb = global_aabbs[global_ids[in_buf][i]];
         float3 centre = (aabb.min + aabb.max) * 0.5f;
-        int bin_id = int(k1 * (get(centre, axis) - get(c_aabb.min, axis)));
+        int bin_id = int(k1 * (Get(centre, axis) - Get(c_aabb.min, axis)));
 
         if (bin_id <= plane) {
             global_ids[out_buf][p1++] = global_ids[in_buf][i];
@@ -189,7 +189,7 @@ __device__ static int partition_ids(Task task, int axis, int plane)
     return p1;
 }
 
-__device__ static void run_task(Task task, bool top_of_tree)
+__device__ static void RunTask(Task task, bool top_of_tree)
 {
     Bin bins[NUM_BINS];
     AABB child_c_aabb[2];
@@ -252,10 +252,10 @@ __device__ static void run_task(Task task, bool top_of_tree)
         unsigned end = task.end;
         mid = task.start + (count >> 1);
 
-        reset(child_c_aabb[0]);
-        reset(child_c_aabb[1]);
-        reset(child_p_aabb[0]);
-        reset(child_p_aabb[1]);
+        Reset(child_c_aabb[0]);
+        Reset(child_c_aabb[1]);
+        Reset(child_p_aabb[0]);
+        Reset(child_p_aabb[1]);
 
         for (int i = start; i < mid; i++) {
             unsigned tri_idx = global_ids[task.buffer_idx][i];
@@ -279,13 +279,13 @@ __device__ static void run_task(Task task, bool top_of_tree)
         }
     } else {
         // Partition with bins
-        axis = select_axis(task.c_aabb);
+        axis = SelectAxis(task.c_aabb);
 
-        bin_centroids(task, bins, axis);
+        BinCentroids(task, bins, axis);
 
-        int plane = select_plane(task, bins, child_p_aabb, child_c_aabb);
+        int plane = SelectPlane(task, bins, child_p_aabb, child_c_aabb);
 
-        mid = partition_ids(task, axis, plane);
+        mid = PartitionIds(task, axis, plane);
     }
 
     if (partition) {
@@ -330,7 +330,7 @@ __global__ void PerInstanceBuild(Task* task_queue, AABB* c_aabbs, AABB* p_aabbs,
                                  int* block_counts, int* block_scan,
                                  int* num_leaves, bool top_of_tree)
 {
-    initialise(primitive_ids, nodes, aabbs, scratch, task_queue, c_aabbs,
+    Initialise(primitive_ids, nodes, aabbs, scratch, task_queue, c_aabbs,
                p_aabbs, block_counts, block_scan, *num_leaves, top_of_tree);
 
     __syncthreads();
@@ -340,8 +340,8 @@ __global__ void PerInstanceBuild(Task* task_queue, AABB* c_aabbs, AABB* p_aabbs,
         unsigned num_tasks = min(shared_queue_size, blockDim.x);
 
         if (threadIdx.x < num_tasks) {
-            Task task = setup_task();
-            run_task(task, top_of_tree);
+            Task task = SetupTask();
+            RunTask(task, top_of_tree);
         }
 
         iteration++;
