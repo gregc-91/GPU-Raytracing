@@ -156,7 +156,7 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
         (TraceRays<<<grid_size, block_size>>>(
             cu_triangles, cu_nodes, cu_attributes->gpu(), cu_materials->gpu(),
             camera, cu_num_tests->gpu(), args.render_type,
-            viewCudaSurfaceObject, root, count)));
+            viewCudaSurfaceObject, root, count, scene.light)));
     check(cudaPeekAtLastError());
 
     // unmap buffer object

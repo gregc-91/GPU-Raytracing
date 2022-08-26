@@ -154,15 +154,20 @@ struct AABB {
         max = minmax[1];
     }
 
-    __host__ __device__ AABB intersection(const AABB& other)
+    __host__ __device__ AABB Intersection(const AABB& other)
     {
         return AABB{fmaxf(min, other.min), fminf(max, other.max)};
     }
 
-    __host__ __device__ bool valid()
+    __host__ __device__ bool Valid()
     {
         return max.x >= min.x && max.y >= min.y && max.z >= min.z;
     };
+
+    __host__ __device__ float3 Centre()
+    {
+        return (min + max) * 0.5f;
+    }
 };
 
 __device__ inline float sa(const AABB& a)

@@ -351,7 +351,7 @@ __global__ void SetupSplits(Triangle* triangles, TrianglePair* triangles_out,
                 // replaced by clipper later)
                 AABB cell_aabb = CellToBounds(cell, p_aabb_float);
 
-                cell_aabb = aabb.intersection(cell_aabb);
+                cell_aabb = aabb.Intersection(cell_aabb);
 
                 // Update the global bounds
                 AtomicConvertCombine(*s_p_aabb, cell_aabb);
@@ -473,8 +473,8 @@ __global__ void SetupPairSplits(Triangle* triangles,
                     // When merging, throw away the voxel if both prim AABBs
                     // don't overlap the cell
                     if (merge) {
-                        if (!a_aabb.intersection(cell_aabb).valid() &&
-                            !b_aabb.intersection(cell_aabb).valid()) {
+                        if (!a_aabb.Intersection(cell_aabb).Valid() &&
+                            !b_aabb.Intersection(cell_aabb).Valid()) {
                             skipped_cells++;
                             // atomicAdd(extra_leaves, -1); // Free up one
                             // reserved entry
@@ -483,10 +483,10 @@ __global__ void SetupPairSplits(Triangle* triangles,
                             if (GridNextCell(cell, min_cell, max_cell)) break;
                             continue;
                         }
-                        cell_aabb = Combine(a_aabb.intersection(cell_aabb),
-                                            b_aabb.intersection(cell_aabb));
+                        cell_aabb = Combine(a_aabb.Intersection(cell_aabb),
+                                            b_aabb.Intersection(cell_aabb));
                     } else {
-                        cell_aabb = aabb.intersection(cell_aabb);
+                        cell_aabb = aabb.Intersection(cell_aabb);
                     }
 
                     // Update the global bounds

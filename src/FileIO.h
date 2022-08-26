@@ -14,6 +14,7 @@ struct Scene {
 
     Library library;
     AABB aabb;
+    float3 light;
 };
 
 Scene LoadOBJFromFile(const std::string filename);

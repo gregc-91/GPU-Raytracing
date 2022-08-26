@@ -21,8 +21,9 @@ bool FileExists(std::string filename)
     if (fp) {
         fclose(fp);
         return true;
-    } else
+    } else {
         return false;
+    }
 }
 
 std::string BaseDirectory(std::string filename)
@@ -38,7 +39,7 @@ std::vector<std::string> Split(std::string s, char delim = ' ')
 {
     std::istringstream ss(s);
     __r.clear();
-    
+
     while (std::getline(ss, __w, delim)) {
         __r.push_back(__w);
     }
@@ -70,7 +71,21 @@ char* gstrtok(char** s, const char* delims)
     return NULL;
 }
 
-float3 GenerateNormal(const Triangle& tri) {
+float3 SetupLight(std::string obj_name, AABB& aabb)
+{
+    float3 result = aabb.Centre();
+    std::string lights_name = BaseDirectory(obj_name) + "/light.txt";
+    if (FileExists(lights_name)) {
+        FILE* lights_fp = fopen(lights_name.c_str(), "r");
+        assert(lights_fp);
+        int res = fscanf(lights_fp, "%f %f %f", &result.x, &result.y, &result.z);
+        fclose(lights_fp);
+    }
+    return result;
+}
+
+float3 GenerateNormal(const Triangle& tri)
+{
     float3 e1 = tri.v1 - tri.v0;
     float3 e2 = tri.v2 - tri.v1;
     return normalize(cross(e1, e2));
@@ -330,12 +345,15 @@ Scene LoadOBJFromFile(const std::string filename)
                                              : make_float2(0.0f);
                 a.uv[2] = idxs[i + 0].t >= 0 ? uv_buffer[idxs[i + 0].t]
                                              : make_float2(0.0f);
-                a.normal[0] = idxs[0 + 0].n >= 0 ? normals_buffer[idxs[0 + 0].n]
-                                                 : GenerateNormal(scene.triangles.back());
-                a.normal[1] = idxs[i - 1].n >= 0 ? normals_buffer[idxs[i - 1].n]
-                                                 : GenerateNormal(scene.triangles.back());
-                a.normal[2] = idxs[i + 0].n >= 0 ? normals_buffer[idxs[i + 0].n]
-                                                 : GenerateNormal(scene.triangles.back());
+                a.normal[0] = idxs[0 + 0].n >= 0
+                                  ? normals_buffer[idxs[0 + 0].n]
+                                  : GenerateNormal(scene.triangles.back());
+                a.normal[1] = idxs[i - 1].n >= 0
+                                  ? normals_buffer[idxs[i - 1].n]
+                                  : GenerateNormal(scene.triangles.back());
+                a.normal[2] = idxs[i + 0].n >= 0
+                                  ? normals_buffer[idxs[i + 0].n]
+                                  : GenerateNormal(scene.triangles.back());
                 scene.attributes.push_back(a);
             }
         }
@@ -357,6 +375,10 @@ Scene LoadOBJFromFile(const std::string filename)
     printf("  aabb: (%f %f %f %f %f %f)\n", scene.aabb.min.x, scene.aabb.min.y,
            scene.aabb.min.z, scene.aabb.max.x, scene.aabb.max.y,
            scene.aabb.max.z);
+
+    scene.light = SetupLight(filename, scene.aabb);
+
+    printf("  light: %f %f %f\n", scene.light.x, scene.light.y, scene.light.z);
 
     return scene;
 }
