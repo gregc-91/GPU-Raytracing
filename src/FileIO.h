@@ -2,7 +2,18 @@
 
 #include <string>
 #include <vector>
+#include <map>
+
+#include "Common.cuh"
 
 struct Triangle;
 
-std::vector<Triangle> LoadOBJFromFile(std::string filename);
+struct Scene {
+    std::vector<Triangle> triangles;
+    std::vector<Attributes> attributes;
+
+    Library library;
+    AABB aabb;
+};
+
+Scene LoadOBJFromFile(const std::string filename);

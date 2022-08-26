@@ -33,27 +33,11 @@ __device__ static void reset(AABB& a)
     a.max = make_float3(-FLT_MAX);
 }
 
-__device__ static AABB combine(const AABB& a, const AABB& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b.min);
-    r.max = fmaxf(a.max, b.max);
-    return r;
-}
-
-__device__ static AABB combine(const AABB& a, const float3& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b);
-    r.max = fmaxf(a.max, b);
-    return r;
-}
-
 __device__ static Bin combine(const Bin& a, const Bin& b)
 {
     Bin r;
-    r.c_aabb = combine(a.c_aabb, b.c_aabb);
-    r.p_aabb = combine(a.p_aabb, b.p_aabb);
+    r.c_aabb = Combine(a.c_aabb, b.c_aabb);
+    r.p_aabb = Combine(a.p_aabb, b.p_aabb);
     r.count = a.count + b.count;
     return r;
 }
@@ -278,8 +262,8 @@ __device__ static void run_task(Task task, bool top_of_tree)
             float3 centre =
                 (global_aabbs[tri_idx].max + global_aabbs[tri_idx].min) * 0.5f;
 
-            child_p_aabb[0] = combine(child_p_aabb[0], global_aabbs[tri_idx]);
-            child_c_aabb[0] = combine(child_c_aabb[0], centre);
+            child_p_aabb[0] = Combine(child_p_aabb[0], global_aabbs[tri_idx]);
+            child_c_aabb[0] = Combine(child_c_aabb[0], centre);
 
             global_ids[task.buffer_idx ^ 1][i] = global_ids[task.buffer_idx][i];
         }
@@ -288,8 +272,8 @@ __device__ static void run_task(Task task, bool top_of_tree)
             float3 centre =
                 (global_aabbs[tri_idx].max + global_aabbs[tri_idx].min) * 0.5f;
 
-            child_p_aabb[1] = combine(child_p_aabb[1], global_aabbs[tri_idx]);
-            child_c_aabb[1] = combine(child_c_aabb[1], centre);
+            child_p_aabb[1] = Combine(child_p_aabb[1], global_aabbs[tri_idx]);
+            child_c_aabb[1] = Combine(child_c_aabb[1], centre);
 
             global_ids[task.buffer_idx ^ 1][i] = global_ids[task.buffer_idx][i];
         }

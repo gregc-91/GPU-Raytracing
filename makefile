@@ -1,10 +1,17 @@
 # Config options
-EXE    = cuda_raytracing
-SRC    = src
-BIN    = bin
-CC     = nvcc
-SHELL  = /bin/bash
-CFLAGS = --std=c++17
+EXE     = cuda_raytracing
+SRC     = src
+BIN     = bin
+CC      = nvcc
+SHELL   = /bin/bash
+CUFLAGS = --std=c++17 -maxrregcount=32 -O2
+CFLAGS  = --std=c++17 -O2
+LFLAGS  = 
+
+ifdef DEBUG
+CFLAGS += --debug --compiler-options "-fsanitize=address"
+LFLAGS += --linker-options "-fsanitize=address"
+endif
 
 # Shell colours
 BLACK =\u001b[30;1m
@@ -45,7 +52,7 @@ CPP_OBJS := $(shell find $(SRC) -name '*.cpp' | sed -r "s/($(SRC))\/(.*)\.(cpp)/
 obj/%.obj: $(SRC)/%.cu
 	@mkdir -p $(@D)
 	@echo -e "Make: compiling kernel file ${GREEN}$<${RESET}"
-	@$(CC) -Iinclude $(CFLAGS) -maxrregcount=32 -o $@ -c $<
+	@$(CC) -Iinclude $(CUFLAGS) -o $@ -c $<
 	
 obj/%.obj: $(SRC)/%.cpp
 	@mkdir -p $(@D)
@@ -56,7 +63,7 @@ all: $(BIN)/$(PLATFORM)/$(EXE)
 
 $(BIN)/$(PLATFORM)/$(EXE): $(CU_OBJS) $(CPP_OBJS) 
 	@echo -e "Make: building executable ${CYAN}$<${RESET}"
-	@$(CC) -Llib/x64 -lglew64 $(CU_OBJS) $(CPP_OBJS) -o $(BIN)/$(EXE)
+	@$(CC) -Llib/x64 -lglew64 $(LFLAGS) $(CU_OBJS) $(CPP_OBJS) -o $(BIN)/$(EXE)
 	
 format:
 	clang-format -i $(shell ls $(SRC)/*)

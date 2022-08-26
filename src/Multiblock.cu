@@ -25,22 +25,6 @@ __device__ static float3 Get(const Triangle& t, int i)
     return i == 0 ? t.v0 : i == 1 ? t.v1 : t.v2;
 }
 
-__device__ static AABB Combine(const AABB& a, const AABB& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b.min);
-    r.max = fmaxf(a.max, b.max);
-    return r;
-}
-
-[[maybe_unused]] __device__ static AABB Combine(const AABB& a, const float3& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b);
-    r.max = fmaxf(a.max, b);
-    return r;
-}
-
 __device__ static float3 FloatToOrderedInt(float3 a)
 {
     return make_float3(__int_as_float(FloatToOrderedInt(a.x)),
@@ -162,17 +146,19 @@ __device__ Triangle RotateTriangle(const Triangle& a, int rot)
 
 __device__ static TrianglePair CreateTrianglePair(const Triangle* a,
                                                   const Triangle* b,
+                                                  uint32_t a_id, uint32_t b_id,
                                                   Rotations r)
 {
     if (b == NULL) {
-        return TrianglePair(a->v0, a->v1, a->v2, a->v2);
+        return TrianglePair(a->v0, a->v1, a->v2, a->v2, a_id, 0);
     }
     Triangle a_rotated = RotateTriangle(*a, r.rot_a);
 
     TrianglePair result = TrianglePair(a_rotated.v0, a_rotated.v1, a_rotated.v2,
                                        r.rot_b == 2   ? b->v0
                                        : r.rot_b == 1 ? b->v1
-                                                      : b->v2);
+                                                      : b->v2,
+                                       a_id, b_id);
 
     return result;
 }
@@ -303,11 +289,13 @@ __global__ void Setup(Triangle* triangles, TrianglePair* triangles_out,
         // Write out the primitive aabbs and update refs
         if (merge) {
             AssignVolatile(aabbs[idx], p_aabb);
-            triangles_out[idx] = CreateTrianglePair(a, b, r);
+            triangles_out[idx] =
+                CreateTrianglePair(a, b, tri_id, tri_id + 1, r);
         } else {
             AssignVolatile(aabbs[idx], a_aabb);
-            triangles_out[idx + 0] = CreateTrianglePair(a, NULL, r);
-            triangles_out[idx + 1] = CreateTrianglePair(b, NULL, r);
+            triangles_out[idx + 0] = CreateTrianglePair(a, NULL, tri_id, 0, r);
+            triangles_out[idx + 1] =
+                CreateTrianglePair(b, NULL, tri_id + 1, 0, r);
         }
         // aabbs[tri_id] = merge ? p_aabb : a_aabb;
         ids[idx].id = idx;
@@ -352,7 +340,7 @@ __global__ void SetupSplits(Triangle* triangles, TrianglePair* triangles_out,
                        num_extra_cells) < extra_leaf_thresh;
 
         Rotations r = {0, 0};
-        triangles_out[tri_id] = CreateTrianglePair(a, NULL, r);
+        triangles_out[tri_id] = CreateTrianglePair(a, NULL, tri_id, 0, r);
 
         if (split_a) {
             int3 cell = min_cell;
@@ -448,10 +436,13 @@ __global__ void SetupPairSplits(Triangle* triangles,
 
         unsigned tri_block_index = atomicAdd(num_triangles_out, count);
         if (merge) {
-            triangles_out[tri_block_index] = CreateTrianglePair(a, b, r);
+            triangles_out[tri_block_index] =
+                CreateTrianglePair(a, b, tri_id, tri_id + 1, r);
         } else {
-            triangles_out[tri_block_index + 0] = CreateTrianglePair(a, NULL, r);
-            triangles_out[tri_block_index + 1] = CreateTrianglePair(b, NULL, r);
+            triangles_out[tri_block_index + 0] =
+                CreateTrianglePair(a, NULL, tri_id, 0, r);
+            triangles_out[tri_block_index + 1] =
+                CreateTrianglePair(b, NULL, tri_id + 1, 0, r);
         }
 
         // Loop for one tri, two tris, or a pair

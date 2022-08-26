@@ -38,7 +38,7 @@ void UpdateCameraPosition(Camera& camera, InputState input)
         camera.position = camera.position - camera.u * camera.scale * 0.25;
     if (input.key_pressed_d)
         camera.position = camera.position + camera.u * camera.scale * 0.25;
-    if (input.key_pressed_q)
+    if (input.key_pressed_q || input.key_pressed_space)
         camera.position = camera.position - camera.v * camera.scale * 0.25;
     if (input.key_pressed_e)
         camera.position = camera.position + camera.v * camera.scale * 0.25;
@@ -78,15 +78,15 @@ void InitialiseCamera(Camera& camera, AABB scene_aabb)
         make_float3(centre.x, centre.y, scene_aabb.min.z - length.z);
     camera.max_depth = max(max(length.x, length.y), length.z) * 1.5f;
 
-	camera.position = scene_aabb.max * 1.2f;
+    camera.position = scene_aabb.max * 1.2f;
 
-	//camera.w = (scene_aabb.max + scene_aabb.min)*0.5f - scene_aabb.max;
-	//camera.w = normalize(camera.w);
-	//camera.pitch = asin(-camera.w.y);
-	//camera.yaw = acos(camera.w.z / cos(camera.pitch));
+    // camera.w = (scene_aabb.max + scene_aabb.min)*0.5f - scene_aabb.max;
+    // camera.w = normalize(camera.w);
+    // camera.pitch = asin(-camera.w.y);
+    // camera.yaw = acos(camera.w.z / cos(camera.pitch));
 
-	camera.position = centre;
-	camera.yaw = M_PI / 2;
+    camera.position = centre;
+    camera.yaw = M_PI / 2;
 
-	UpdateCamera(camera);
+    UpdateCamera(camera);
 }

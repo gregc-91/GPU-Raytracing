@@ -71,6 +71,11 @@ inline __host__ __device__ float2 make_float2(uint2 a)
     return make_float2(float(a.x), float(a.y));
 }
 
+inline __host__ __device__ uchar4 make_uchar4(float4 a)
+{
+    return make_uchar4(uint8_t(a.x), uint8_t(a.y), uint8_t(a.z), uint8_t(a.w));
+}
+
 inline __host__ __device__ int2 make_int2(int s) { return make_int2(s, s); }
 inline __host__ __device__ int2 make_int2(int3 a)
 {
@@ -157,6 +162,11 @@ inline __host__ __device__ uint3 make_uint3(uint4 a)
 inline __host__ __device__ uint3 make_uint3(int3 a)
 {
     return make_uint3(uint(a.x), uint(a.y), uint(a.z));
+}
+
+inline __host__ __device__ float4 make_float4(uchar4 a)
+{
+    return make_float4(float(a.x), float(a.y), float(a.z), float(a.w));
 }
 
 inline __host__ __device__ float4 make_float4(float s)

@@ -67,22 +67,6 @@ __device__ static void Reset(AABB& a)
     a.max = make_float3(-FLT_MAX);
 }
 
-__device__ static AABB Combine(const AABB& a, const AABB& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b.min);
-    r.max = fmaxf(a.max, b.max);
-    return r;
-}
-
-__device__ static AABB Combine(const AABB& a, const float3& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b);
-    r.max = fmaxf(a.max, b);
-    return r;
-}
-
 __device__ static Bin Combine(const Bin& a, const Bin& b)
 {
     Bin r;

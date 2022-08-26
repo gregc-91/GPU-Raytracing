@@ -77,14 +77,6 @@ __device__ static bool Equal(const float3& a, const float3& b)
     return a.x == b.x && a.y == b.y && a.z == b.z;
 }
 
-__device__ static AABB Combine(const AABB& a, const AABB& b)
-{
-    AABB r;
-    r.min = fminf(a.min, b.min);
-    r.max = fmaxf(a.max, b.max);
-    return r;
-}
-
 // Check if triangle t shares an edge with edge (a->b)
 // Returns how many steps to
 //  t such that v0==t.v0 && v1==t.v1, if there is a shared edge
@@ -139,17 +131,20 @@ __device__ Triangle RotateTriangle(const float3* a, int rot)
 }
 
 __device__ static TrianglePair CreateTrianglePair(const float3* a,
-                                                  const float3* b, Rotations r)
+                                                  const float3* b,
+                                                  uint32_t a_id, uint32_t b_id,
+                                                  Rotations r)
 {
     if (b == NULL) {
-        return TrianglePair(a[0], a[1], a[2], a[2]);
+        return TrianglePair(a[0], a[1], a[2], a[2], a_id, 0);
     }
     Triangle a_rotated = RotateTriangle(a, r.rot_a);
 
     TrianglePair result = TrianglePair(a_rotated.v0, a_rotated.v1, a_rotated.v2,
                                        r.rot_b == 2   ? b[0]
                                        : r.rot_b == 1 ? b[1]
-                                                      : b[2]);
+                                                      : b[2],
+                                       a_id, b_id);
 
     return result;
 }
@@ -424,7 +419,7 @@ __global__ void GenerateTriangles(unsigned* sorted_indices, float3* vertices,
     TrianglePair result;
     if (is_pair) {
         CanFormTrianglePair(a, b, r);
-        result = CreateTrianglePair(a, b, r);
+        result = CreateTrianglePair(a, b, index, index + 1, r);
     } else {
         result.v0 = a[0];
         result.v1 = a[1];

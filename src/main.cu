@@ -47,17 +47,16 @@ const unsigned int window_height = 768;
 GLuint viewGLTexture;
 cudaGraphicsResource* viewCudaResource;
 
-int num_triangles = 0;
-int num_leaves = 0;
-std::vector<Triangle> triangles;
-BuildInput buildInput;
+Scene scene;
 Arguments args;
+InputState input;
+BuildInput buildInput;
 
 MemoryBuffer<Camera>* cu_camera;
 MemoryBuffer<float>* cu_depth;
 MemoryBuffer<uint32_t>* cu_num_tests;
-
-InputState input;
+MemoryBuffer<Attributes>* cu_attributes;
+MemoryBuffer<Material>* cu_materials;
 
 void Display();
 void Keyboard(unsigned char key, int x, int y);
@@ -155,8 +154,9 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
 
     run("TraceRays",
         (TraceRays<<<grid_size, block_size>>>(
-            cu_triangles, cu_nodes, camera, cu_num_tests->gpu(),
-            args.render_type, viewCudaSurfaceObject, root, count)));
+            cu_triangles, cu_nodes, cu_attributes->gpu(), cu_materials->gpu(),
+            camera, cu_num_tests->gpu(), args.render_type,
+            viewCudaSurfaceObject, root, count)));
     check(cudaPeekAtLastError());
 
     // unmap buffer object
@@ -165,10 +165,10 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
     check(cudaPeekAtLastError());
     check(cudaDeviceSynchronize());
 
-	if (frame_count == 0) {
-		cu_num_tests->toHost();
-		printf("TraceRays number of tests %d\n", (*cu_num_tests)[0]);
-	}
+    if (frame_count == 0) {
+        cu_num_tests->toHost();
+        printf("TraceRays number of tests %d\n", (*cu_num_tests)[0]);
+    }
 
     // if (frameCount == 0) {
     //	printf("Writing output...");
@@ -206,6 +206,7 @@ void Display()
 
     UpdateCameraPosition(*cu_camera->data(), input);
 
+    unsigned num_triangles = scene.triangles.size();
     unsigned rootIndex = args.build_type == kHybrid ? num_triangles * 2 + 1 : 0;
     unsigned rootCount = args.build_type == kSAH ? 1 : 2;
 
@@ -222,8 +223,9 @@ void Display()
         cudaMalloc(
             &buildInput.nodes_out,
             sizeof(Node) * (num_triangles + max(512, NUM_BLOCKS)) * 2 * 2);
-        cudaMemcpy(buildInput.triangles_in, triangles.data(),
-                   triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
+        cudaMemcpy(buildInput.triangles_in, scene.triangles.data(),
+                   scene.triangles.size() * sizeof(Triangle),
+                   cudaMemcpyHostToDevice);
 
         if (args.build_type == kSAH) {
             RunSahBuild(buildInput, args);
@@ -309,6 +311,9 @@ void Keyboard(unsigned char key, int /*x*/, int /*y*/)
         case 'e':
             input.key_pressed_e = true;
             break;
+        case ' ':
+            input.key_pressed_space = true;
+            break;
         case 'm':
             args.render_type =
                 RenderType((args.render_type + 1) % RenderType::kCount);
@@ -339,6 +344,9 @@ void KeyboardUp(unsigned char key, int /*x*/, int /*y*/)
             break;
         case 'e':
             input.key_pressed_e = false;
+            break;
+        case ' ':
+            input.key_pressed_space = false;
             break;
     }
 }
@@ -407,28 +415,42 @@ int main(int argc, char** argv)
         args = ParseCmd(argc, argv);
 
         // Load the triangles from file
-        triangles = LoadOBJFromFile(g_filename);
-        num_triangles = (unsigned)triangles.size();
+        scene = LoadOBJFromFile(g_filename);
 
-        AABB scene_aabb = {make_float3(FLT_MAX, FLT_MAX, FLT_MAX),
-                           make_float3(-FLT_MAX, -FLT_MAX, -FLT_MAX)};
-        for (auto t : triangles) {
-            scene_aabb.min = f3min(scene_aabb.min, t.v0);
-            scene_aabb.min = f3min(scene_aabb.min, t.v1);
-            scene_aabb.min = f3min(scene_aabb.min, t.v2);
-            scene_aabb.max = f3max(scene_aabb.max, t.v0);
-            scene_aabb.max = f3max(scene_aabb.max, t.v1);
-            scene_aabb.max = f3max(scene_aabb.max, t.v2);
-        }
+        printf("TOP %p\n", scene.library.materials[0].textures[1]);
 
         cu_camera = new MemoryBuffer<Camera>(1);
         cu_depth = new MemoryBuffer<float>(window_width * window_height);
         cu_num_tests = new MemoryBuffer<uint32_t>(1);
+        cu_attributes = new MemoryBuffer<Attributes>(scene.attributes.size());
+        cu_materials =
+            new MemoryBuffer<Material>(scene.library.materials.size());
 
         cu_num_tests->toDevice();
 
-        InitialiseCamera(*cu_camera->data(), scene_aabb);
+        InitialiseCamera(*cu_camera->data(), scene.aabb);
+        memcpy(cu_attributes->data(), scene.attributes.data(),
+               scene.attributes.size() * sizeof(Attributes));
+        memcpy(cu_materials->data(), scene.library.materials.data(),
+               scene.library.materials.size() * sizeof(Material));
+        for (unsigned i = 0; i < scene.library.materials.size(); i++) {
+            if (scene.library.materials[i].textures[0] == NULL) continue;
+
+            printf("%d\n", scene.library.materials[i].max_lod);
+            for (unsigned j = 0; j <= scene.library.materials[i].max_lod; j++) {
+                size_t size = 4 *
+                              scene.library.materials[i].texture_sizes[j].x *
+                              scene.library.materials[i].texture_sizes[j].y;
+                check(cudaMalloc(&(*cu_materials)[i].textures[j], size));
+                check(cudaMemcpy((*cu_materials)[i].textures[j],
+                                 scene.library.materials[i].textures[j], size,
+                                 cudaMemcpyHostToDevice));
+            }
+        }
+
         cu_camera->toDevice();
+        cu_attributes->toDevice();
+        cu_materials->toDevice();
 
         glutMainLoop();
     }

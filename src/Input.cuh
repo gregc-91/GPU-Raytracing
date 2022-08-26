@@ -8,6 +8,7 @@ struct InputState {
     bool key_pressed_d = false;
     bool key_pressed_q = false;
     bool key_pressed_e = false;
+    bool key_pressed_space = false;
     bool mouse_down = false;
     int prev_x, prev_y;
 };
