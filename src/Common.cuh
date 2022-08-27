@@ -53,44 +53,88 @@ struct Attributes {
     int32_t material_id;
 };
 
+struct Texture {
+    std::string name;
+    uchar4* mips[NUM_LODS] = {NULL};
+    uchar4* gpu_mips[NUM_LODS] = {NULL};
+    int2 sizes[NUM_LODS];
+    uint max_lod;
+
+    Texture(std::string name) : name(name)
+    {
+        for (unsigned i = 0; i < NUM_LODS; i++) mips[i] = NULL;
+    }
+
+    Texture(std::string name, uchar4* mip0, int2 size0) : name(name)
+    {
+        mips[0] = mip0;
+        sizes[0] = size0;
+        max_lod = 0;
+    }
+
+    Texture(const Texture& other) : name(other.name), max_lod(other.max_lod)
+    {
+        for (unsigned i = 0; i < NUM_LODS; i++) {
+            mips[i] = other.mips[i];
+            sizes[i] = other.sizes[i];
+        }
+    }
+
+    uchar4 ReadTexel(int2 coord, int lod);
+    void WriteTexel(int2 coord, int lod, uchar4 val);
+    void GenerateLODs();
+};
+
 struct Material {
     std::string name;
     float3 ambient;
     float3 diffuse;
     float3 specular;
-    uchar4* textures[NUM_LODS] = {NULL};
-    int2 texture_sizes[NUM_LODS];
-    uint max_lod;
+    float specular_exp;
+    int32_t texture;
 
     Material() : name("") {}
     Material(std::string s) : name(s)
     {
-        for (unsigned i = 0; i < NUM_LODS; i++) textures[i] = NULL;
+        ambient = make_float3(0.0f);
+        diffuse = make_float3(0.0f);
+        specular = make_float3(0.0f);
+        specular_exp = 0.0f;
+        texture = -1;
     }
     Material(const Material& other)
         : name(other.name),
           ambient(other.ambient),
           diffuse(other.diffuse),
           specular(other.specular),
-          max_lod(other.max_lod)
+          specular_exp(other.specular_exp),
+          texture(other.texture)
     {
-        for (unsigned i = 0; i < NUM_LODS; i++) {
-            textures[i] = other.textures[i];
-            texture_sizes[i] = other.texture_sizes[i];
-        }
     }
     ~Material();
-    uchar4 ReadTexel(int2 coord, int lod);
-    void WriteTexel(int2 coord, int lod, uchar4 val);
-    void GenerateLODs();
+    uchar4 ReadTexel(Texture* textures, int2 coord, int lod);
+    void WriteTexel(Texture* textures, int2 coord, int lod, uchar4 val);
+    bool HasTexture();
 };
 
 struct Library {
     std::vector<Material> materials;
-    std::map<std::string, uint32_t> name_to_id;
+    std::vector<Texture> textures;
+    std::map<std::string, uint32_t> name_to_mat;
+    std::map<std::string, uint32_t> name_to_tex;
+
+    Material* gpu_materials;
+    Texture* gpu_textures;
 
     void AddMaterial(std::string name);
-    uint32_t GetMaterialId(std::string name);
+    int32_t GetMaterialId(std::string name);
+    Material& GetMaterial(std::string name);
+    Material& GetMaterial(uint32_t i);
+    int32_t GetTextureId(std::string name);
+    Texture& GetTexture(uint32_t i);
+    Texture& GetTextureFromMat(uint32_t i);
+
+    void CopyToDevice();
 };
 
 struct Node {
@@ -164,10 +208,7 @@ struct AABB {
         return max.x >= min.x && max.y >= min.y && max.z >= min.z;
     };
 
-    __host__ __device__ float3 Centre()
-    {
-        return (min + max) * 0.5f;
-    }
+    __host__ __device__ float3 Centre() { return (min + max) * 0.5f; }
 };
 
 __device__ inline float sa(const AABB& a)

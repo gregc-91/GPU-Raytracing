@@ -22,34 +22,30 @@ __device__ float3 InterpolateNormals(Attributes& attributes,
            attributes.normal[2] * barycentrics.y;
 }
 
-__device__ float4 Sample(Material& material, int2 xy, int lod)
+__device__ float4 Sample(Texture& texture, int2 xy, int lod)
 {
-    if (material.textures[lod] == NULL) {
-        return make_float4(255, 0, 255, 255);
-    }
-
-    xy = clamp(xy, make_int2(0), material.texture_sizes[lod] - 1);
+    xy = clamp(xy, make_int2(0), texture.sizes[lod] - 1);
     return make_float4(
-        material.textures[lod][xy.y * material.texture_sizes[lod].x + xy.x]);
+        texture.gpu_mips[lod][xy.y * texture.sizes[lod].x + xy.x]);
 }
 
-__device__ uchar4 Sample(Material& material, float2 uv, int lod)
+__device__ uchar4 Sample(Texture& texture, float2 uv, int lod)
 {
-    float2 coord = fracf(uv) * make_float2(material.texture_sizes[lod] - 1);
+    float2 coord = fracf(uv) * make_float2(texture.sizes[lod] - 1);
     int2 icoord =
-        make_int2(coord.x, material.texture_sizes[lod].y - coord.y - 1);
+        make_int2(coord.x, texture.sizes[lod].y - coord.y - 1);
 
-    if (material.textures[lod] == NULL) {
+    if (texture.gpu_mips[lod] == NULL) {
         return make_uchar4(255, 0, 255, 255);
     }
 
-    return make_uchar4(Sample(material, icoord, lod));
+    return make_uchar4(Sample(texture, icoord, lod));
 }
 
-__device__ uchar4 BilinearSample(Material& m, float2 uv, int lod)
+__device__ uchar4 BilinearSample(Texture& t, float2 uv, int lod)
 {
-    float2 coord = fracf(uv) * make_float2(m.texture_sizes[lod]) - 0.5f;
-    coord = make_float2(coord.x, m.texture_sizes[lod].y - coord.y);
+    float2 coord = fracf(uv) * make_float2(t.sizes[lod]) - 0.5f;
+    coord = make_float2(coord.x, t.sizes[lod].y - coord.y);
     int2 i0 = make_int2(coord);
     int2 i1 = i0 + make_int2(1, 0);
     int2 i2 = i0 + make_int2(0, -1);
@@ -62,8 +58,8 @@ __device__ uchar4 BilinearSample(Material& m, float2 uv, int lod)
     float w2 = (1.0f - d.x) * (1.0f - d.y);
     float w3 = d.x * (1.0f - d.y);
 
-    return make_uchar4(Sample(m, i0, lod) * w0 + Sample(m, i1, lod) * w1 +
-                       Sample(m, i2, lod) * w2 + Sample(m, i3, lod) * w3);
+    return make_uchar4(Sample(t, i0, lod) * w0 + Sample(t, i1, lod) * w1 +
+                       Sample(t, i2, lod) * w2 + Sample(t, i3, lod) * w3);
 }
 
 __device__ bool IntersectRayAabb(const Node& node, const Ray& ray,
@@ -118,7 +114,7 @@ __device__ float4 RayTriangleGradients(Triangle& tri, Ray& ray, float spread)
 
 __device__ float ComputeLOD(Ray& ray, RayResult& ray_result, float spread,
                             TrianglePair& tri, Attributes& attribs,
-                            Material& mat)
+                            Texture& tex)
 {
     Triangle t(tri.v0, tri.v1, tri.v2);
     float4 spread_barys = RayTriangleGradients(t, ray, spread);
@@ -129,10 +125,10 @@ __device__ float ComputeLOD(Ray& ray, RayResult& ray_result, float spread,
     float2 uvs_y =
         InterpolateUVs(attribs, make_float2(spread_barys.z, spread_barys.w));
 
-    float2 dtdx = fabs(uvs_x - uvs) * make_float2(mat.texture_sizes[0]);
-    float2 dtdy = fabs(uvs_y - uvs) * make_float2(mat.texture_sizes[0]);
+    float2 dtdx = fabs(uvs_x - uvs) * make_float2(tex.sizes[0]);
+    float2 dtdy = fabs(uvs_y - uvs) * make_float2(tex.sizes[0]);
     float max_change = fmaxf(fmaxf(dtdx.x, dtdx.y), fmaxf(dtdy.x, dtdy.y));
-    float lod = clamp(log2f(max_change), 0.0f, float(mat.max_lod));
+    float lod = clamp(log2f(max_change), 0.0f, float(tex.max_lod));
     return lod;
 }
 
@@ -254,10 +250,10 @@ __device__ bool TraceRay(TrianglePair* triangles, Node* nodes,
 
 __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
                                 uint32_t root, uint32_t count,
-                                Attributes* attributes, Ray& ray,
+                                Attributes* attributes, Texture* textures, Ray& ray,
                                 RayResult& ray_result, Material& mat,
                                 Attributes& attribs, float3 light, float spread,
-                                bool textures, bool shadows)
+                                bool use_textures, bool use_shadows)
 {
     float3 light_colour = {1.0f, 0.9f, 0.8f};
     float3 light_pos = light;
@@ -267,26 +263,31 @@ __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
 
     float3 light_dir = normalize(light_pos - hit_pos);
 
-    float ambient_strength = 0.2f;
-    float diffuse_strength = 0.8f;
+    float3 ambient = 0.1f * light_colour;
+    float3 diffuse = 0.9f * max(dot(normal, light_dir), 0.0f) * light_colour;
+    float3 specular =
+        1.0f *
+        pow(max(dot(-ray.direction, reflect(-light_dir, normal)), 0.0),
+            mat.specular_exp) *
+        light_colour;
 
-    float3 ambient = light_colour * ambient_strength;
-    float3 diffuse =
-        max(dot(normal, light_dir), 0.0f) * light_colour * diffuse_strength;
+    float3 object_ambient = mat.ambient;
+    float3 object_diffuse = mat.diffuse;
+    float3 object_specular = mat.specular;
 
-    float3 object_colour = mat.diffuse;
-    if (textures && mat.textures[0]) {
+    if (use_textures && mat.texture != -1) {
+        Texture& tex = textures[mat.texture];
         float lod =
             ComputeLOD(ray, ray_result, spread,
-                       triangles[ray_result.primitive_id], attribs, mat);
-        uchar4 tex = BilinearSample(
-            mat, InterpolateUVs(attribs, ray_result.barycentrics), lod);
-        object_colour.x *= float(tex.x) / 255;
-        object_colour.y *= float(tex.y) / 255;
-        object_colour.z *= float(tex.z) / 255;
+                       triangles[ray_result.primitive_id], attribs, tex);
+        uchar4 smp = BilinearSample(
+            tex, InterpolateUVs(attribs, ray_result.barycentrics), lod);
+        object_diffuse.x *= float(smp.x) / 255;
+        object_diffuse.y *= float(smp.y) / 255;
+        object_diffuse.z *= float(smp.z) / 255;
     }
 
-    if (shadows) {
+    if (use_shadows) {
         Ray shadow_ray;
         RayResult shadow_result;
         TraceStats shadow_stats = {0};
@@ -301,16 +302,19 @@ __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
         if (hit) diffuse = make_float3(0.0f);
     }
 
-    float3 colour = diffuse * object_colour + ambient * object_colour;
+    float3 colour = diffuse * object_diffuse + ambient * object_ambient +
+                    specular * object_specular;
+    colour = clamp(colour, 0.0f, 1.0f);
 
     return make_uchar4(colour.x * 255, colour.y * 255, colour.z * 255, 255);
 }
 
 __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
                           Attributes* attributes, Material* materials,
-                          Camera* camera, uint32_t* num_tests,
-                          RenderType render_type, cudaSurfaceObject_t image,
-                          unsigned root, unsigned count, float3 light)
+                          Texture* textures, Camera* camera,
+                          uint32_t* num_tests, RenderType render_type,
+                          cudaSurfaceObject_t image, unsigned root,
+                          unsigned count, float3 light)
 {
     unsigned x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -363,29 +367,31 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
     } else if (render_type == RenderType::kDiffuse) {
         if (hit) {
             colour =
-                AmbientShader(triangles, nodes, root, count, attributes, ray,
+                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
                               ray_result, materials[attribs.material_id],
                               attribs, light, spread, false, false);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
     } else if (render_type == RenderType::kLODs) {
-        if (mat.textures[0]) {
+        if (mat.texture != -1) {
+            Texture& texture = textures[mat.texture];
             float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
             float lod =
-                ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, mat);
+                ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, texture);
             colour = make_uchar4((unsigned char)(int(lod) * 20));
         } else {
             colour = make_uchar4(255, 0, 255, 255);
         }
     } else if (render_type == RenderType::kTexture) {
         if (hit) {
-            if (mat.textures[0]) {
+            if (mat.texture != -1) {
+                Texture& texture = textures[mat.texture];
                 float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
                 float lod =
-                    ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, mat);
+                    ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, texture);
 
-                colour = BilinearSample(mat, uvs, lod);
+                colour = BilinearSample(texture, uvs, lod);
             } else {
                 colour.x = mat.diffuse.x * 255;
                 colour.y = mat.diffuse.y * 255;
@@ -398,7 +404,7 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
     } else if (render_type == RenderType::kTextureLit) {
         if (hit) {
             colour =
-                AmbientShader(triangles, nodes, root, count, attributes, ray,
+                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
                               ray_result, materials[attribs.material_id],
                               attribs, light, spread, true, false);
         } else {
@@ -407,7 +413,7 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
     } else if (render_type == RenderType::kTextureLitShadows) {
         if (hit) {
             colour =
-                AmbientShader(triangles, nodes, root, count, attributes, ray,
+                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
                               ray_result, materials[attribs.material_id],
                               attribs, light, spread, true, true);
         } else {

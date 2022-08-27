@@ -78,7 +78,8 @@ float3 SetupLight(std::string obj_name, AABB& aabb)
     if (FileExists(lights_name)) {
         FILE* lights_fp = fopen(lights_name.c_str(), "r");
         assert(lights_fp);
-        int res = fscanf(lights_fp, "%f %f %f", &result.x, &result.y, &result.z);
+        int res =
+            fscanf(lights_fp, "%f %f %f", &result.x, &result.y, &result.z);
         fclose(lights_fp);
     }
     return result;
@@ -91,31 +92,43 @@ float3 GenerateNormal(const Triangle& tri)
     return normalize(cross(e1, e2));
 }
 
-uchar4 Material::ReadTexel(int2 coord, int lod)
+uchar4 Material::ReadTexel(Texture* textures, int2 coord, int lod)
 {
-    int2 size = texture_sizes[lod];
-    int2 clamped = clamp(coord, make_int2(0), size - 1);
-    return textures[lod][clamped.y * size.x + clamped.x];
+    Texture& tex = textures[texture];
+    return tex.ReadTexel(coord, lod);
 }
 
-void Material::WriteTexel(int2 coord, int lod, uchar4 val)
+void Material::WriteTexel(Texture* textures, int2 coord, int lod, uchar4 val)
 {
-    int2 size = texture_sizes[lod];
-    int2 clamped = clamp(coord, make_int2(0), size - 1);
-    textures[lod][clamped.y * size.x + clamped.x] = val;
+    Texture& tex = textures[texture];
+    tex.WriteTexel(coord, lod, val);
 }
 
-void Material::GenerateLODs()
+uchar4 Texture::ReadTexel(int2 coord, int lod)
+{
+    int2 size = sizes[lod];
+    int2 clamped = clamp(coord, make_int2(0), size - 1);
+    return mips[lod][clamped.y * size.x + clamped.x];
+}
+
+void Texture::WriteTexel(int2 coord, int lod, uchar4 val)
+{
+    int2 size = sizes[lod];
+    int2 clamped = clamp(coord, make_int2(0), size - 1);
+    mips[lod][clamped.y * size.x + clamped.x] = val;
+}
+
+void Texture::GenerateLODs()
 {
     uint32_t lod = 0;
-    while (texture_sizes[lod].x > 1 || texture_sizes[lod].y > 1) {
-        texture_sizes[lod + 1] = make_int2((texture_sizes[lod].x + 1) / 2,
-                                           (texture_sizes[lod].y + 1) / 2);
-        textures[lod + 1] = (uchar4*)malloc(texture_sizes[lod + 1].x *
-                                            texture_sizes[lod + 1].y * 4);
+    while (sizes[lod].x > 1 || sizes[lod].y > 1) {
+        sizes[lod + 1] =
+            make_int2((sizes[lod].x + 1) / 2, (sizes[lod].y + 1) / 2);
+        mips[lod + 1] =
+            (uchar4*)malloc(sizes[lod + 1].x * sizes[lod + 1].y * 4);
 
-        for (unsigned j = 0; j < texture_sizes[lod + 1].y; j++)
-            for (unsigned i = 0; i < texture_sizes[lod + 1].x; i++) {
+        for (unsigned j = 0; j < sizes[lod + 1].y; j++)
+            for (unsigned i = 0; i < sizes[lod + 1].x; i++) {
                 // Sample the 4 pixels, the ReadTexel function handles clamping
                 uchar4 a = ReadTexel(make_int2(i * 2 + 0, j * 2 + 0), lod);
                 uchar4 b = ReadTexel(make_int2(i * 2 + 1, j * 2 + 0), lod);
@@ -132,9 +145,11 @@ void Material::GenerateLODs()
     }
     max_lod = lod;
     for (unsigned i = max_lod + 1; i < NUM_LODS; i++) {
-        textures[i] = NULL;
+        mips[i] = NULL;
     }
 }
+
+bool Material::HasTexture() { return texture != -1; }
 
 Material::~Material()
 {
@@ -145,15 +160,44 @@ Material::~Material()
 
 void Library::AddMaterial(const std::string name)
 {
-    name_to_id[name] = materials.size();
+    name_to_mat[name] = materials.size();
     materials.push_back(Material(name));
 }
 
-uint32_t Library::GetMaterialId(const std::string name)
+int32_t Library::GetMaterialId(const std::string name)
 {
-    auto it = name_to_id.find(name);
-    assert(it != name_to_id.end());
-    return it->second;
+    auto it = name_to_mat.find(name);
+    if (it != name_to_mat.end())
+        return it->second;
+    else
+        return -1;
+}
+
+Material& Library::GetMaterial(std::string name)
+{
+    int32_t id = GetMaterialId(name);
+    assert(id != -1);
+    return materials[id];
+}
+
+Material& Library::GetMaterial(uint32_t i) { return materials[i]; }
+
+int32_t Library::GetTextureId(std::string name)
+{
+    auto it = name_to_tex.find(name);
+    if (it != name_to_tex.end())
+        return it->second;
+    else
+        return -1;
+}
+
+Texture& Library::GetTexture(uint32_t i) { return textures[i]; }
+
+Texture& Library::GetTextureFromMat(uint32_t i)
+{
+    Material& mat = materials[i];
+    assert(mat.texture != -1);
+    return textures[mat.texture];
 }
 
 Library LoadMTLFromFile(const std::string filename)
@@ -199,13 +243,23 @@ Library LoadMTLFromFile(const std::string filename)
             int2 dims = {0, 0};
             int channels = 0;
             std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
-            printf("Loading %s\n", texture_name.c_str());
-
             Material& material = library.materials.back();
-            material.textures[0] = (uchar4*)stbi_load(
-                texture_name.c_str(), &dims.x, &dims.y, &channels, 4);
-            material.texture_sizes[0] = dims;
-            material.GenerateLODs();
+
+            // Check if the texture is already loaded
+            if (library.GetTextureId(texture_name) == -1) {
+                printf("Loading %s\n", texture_name.c_str());
+                uchar4* mip0 = (uchar4*)stbi_load(texture_name.c_str(), &dims.x,
+                                                  &dims.y, &channels, 4);
+                material.texture = library.textures.size();
+                library.name_to_tex[texture_name] = library.textures.size();
+                library.textures.push_back(Texture(texture_name, mip0, dims));
+                library.textures.back().GenerateLODs();
+            } else {
+                material.texture = library.GetTextureId(texture_name);
+            }
+        } else if (tokens[0] == "Ns") {
+            assert(tokens.size() > 1);
+            library.materials.back().specular_exp = std::stof(tokens[1]);
         }
     }
 

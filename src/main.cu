@@ -55,8 +55,6 @@ BuildInput buildInput;
 MemoryBuffer<Camera>* cu_camera;
 MemoryBuffer<float>* cu_depth;
 MemoryBuffer<uint32_t>* cu_num_tests;
-MemoryBuffer<Attributes>* cu_attributes;
-MemoryBuffer<Material>* cu_materials;
 
 void Display();
 void Keyboard(unsigned char key, int x, int y);
@@ -154,9 +152,10 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
 
     run("TraceRays",
         (TraceRays<<<grid_size, block_size>>>(
-            cu_triangles, cu_nodes, cu_attributes->gpu(), cu_materials->gpu(),
-            camera, cu_num_tests->gpu(), args.render_type,
-            viewCudaSurfaceObject, root, count, scene.light)));
+            cu_triangles, cu_nodes, scene.gpu_attributes,
+            scene.library.gpu_materials, scene.library.gpu_textures, camera,
+            cu_num_tests->gpu(), args.render_type, viewCudaSurfaceObject, root,
+            count, scene.light)));
     check(cudaPeekAtLastError());
 
     // unmap buffer object
@@ -406,6 +405,43 @@ unsigned CountNodes(Node* nodes, Triangle* triangles, unsigned parent,
     return result;
 }
 
+void Scene::CopyToDevice()
+{
+    check(cudaMalloc(&gpu_attributes, attributes.size() * sizeof(Attributes)));
+    check(cudaMemcpy(gpu_attributes, attributes.data(),
+                     attributes.size() * sizeof(Attributes),
+                     cudaMemcpyHostToDevice));
+    library.CopyToDevice();
+}
+
+void Library::CopyToDevice()
+{
+    // Allocate textures and materials arrays on the device
+    check(cudaMalloc(&gpu_textures,
+                     scene.library.textures.size() * sizeof(Texture)));
+    check(cudaMalloc(&gpu_materials,
+                     scene.library.materials.size() * sizeof(Material)));
+
+    // For each texture object allocate and copy the texture data to the device
+    for (unsigned i = 0; i < textures.size(); i++) {
+        Texture& texture = scene.library.GetTexture(i);
+        for (unsigned j = 0; j <= texture.max_lod; j++) {
+            size_t size = 4 * texture.sizes[j].x * texture.sizes[j].y;
+            check(cudaMalloc(&texture.gpu_mips[j], size));
+            check(cudaMemcpy(texture.gpu_mips[j], texture.mips[j], size,
+                             cudaMemcpyHostToDevice));
+        }
+    }
+
+    // Copy the textre and material arrays to the device
+    check(cudaMemcpy(gpu_materials, materials.data(),
+                     materials.size() * sizeof(Material),
+                     cudaMemcpyHostToDevice));
+    check(cudaMemcpy(gpu_textures, textures.data(),
+                     textures.size() * sizeof(Texture),
+                     cudaMemcpyHostToDevice));
+}
+
 int main(int argc, char** argv)
 {
     InitGL(&argc, argv);
@@ -417,40 +453,17 @@ int main(int argc, char** argv)
         // Load the triangles from file
         scene = LoadOBJFromFile(g_filename);
 
-        printf("TOP %p\n", scene.library.materials[0].textures[1]);
-
         cu_camera = new MemoryBuffer<Camera>(1);
         cu_depth = new MemoryBuffer<float>(window_width * window_height);
         cu_num_tests = new MemoryBuffer<uint32_t>(1);
-        cu_attributes = new MemoryBuffer<Attributes>(scene.attributes.size());
-        cu_materials =
-            new MemoryBuffer<Material>(scene.library.materials.size());
 
         cu_num_tests->toDevice();
 
         InitialiseCamera(*cu_camera->data(), scene.aabb);
-        memcpy(cu_attributes->data(), scene.attributes.data(),
-               scene.attributes.size() * sizeof(Attributes));
-        memcpy(cu_materials->data(), scene.library.materials.data(),
-               scene.library.materials.size() * sizeof(Material));
-        for (unsigned i = 0; i < scene.library.materials.size(); i++) {
-            if (scene.library.materials[i].textures[0] == NULL) continue;
-
-            printf("%d\n", scene.library.materials[i].max_lod);
-            for (unsigned j = 0; j <= scene.library.materials[i].max_lod; j++) {
-                size_t size = 4 *
-                              scene.library.materials[i].texture_sizes[j].x *
-                              scene.library.materials[i].texture_sizes[j].y;
-                check(cudaMalloc(&(*cu_materials)[i].textures[j], size));
-                check(cudaMemcpy((*cu_materials)[i].textures[j],
-                                 scene.library.materials[i].textures[j], size,
-                                 cudaMemcpyHostToDevice));
-            }
-        }
 
         cu_camera->toDevice();
-        cu_attributes->toDevice();
-        cu_materials->toDevice();
+
+        scene.CopyToDevice();
 
         glutMainLoop();
     }

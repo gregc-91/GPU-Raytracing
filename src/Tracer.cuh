@@ -20,6 +20,7 @@ typedef struct StackEntry {
 
 __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
                           Attributes* attributes, Material* materials,
-                          Camera* camera, uint32_t* num_tests,
-                          RenderType render_type, cudaSurfaceObject_t image,
-                          unsigned root, unsigned count, float3 light);
+                          Texture* textures, Camera* camera,
+                          uint32_t* num_tests, RenderType render_type,
+                          cudaSurfaceObject_t image, unsigned root,
+                          unsigned count, float3 light);
