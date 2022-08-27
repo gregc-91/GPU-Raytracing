@@ -291,6 +291,21 @@ typedef struct Triangle {
     }
 } Triangle;
 
+struct DeviceAccelerationStructure {
+    TrianglePair* triangles;
+    Node* nodes;
+    unsigned root;
+    unsigned count;
+};
+
+struct DeviceScene {
+    Attributes* attributes;
+    Material* materials;
+    Texture* textures;
+    Camera* camera;
+    float3 light;
+};
+
 #pragma warning(disable : 26812)
 #define check(ans)                            \
     {                                         \

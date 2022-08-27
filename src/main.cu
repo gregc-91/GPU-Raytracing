@@ -150,12 +150,22 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
 
     camera.toDevice();
 
-    run("TraceRays",
-        (TraceRays<<<grid_size, block_size>>>(
-            cu_triangles, cu_nodes, scene.gpu_attributes,
-            scene.library.gpu_materials, scene.library.gpu_textures, camera,
-            cu_num_tests->gpu(), args.render_type, viewCudaSurfaceObject, root,
-            count, scene.light)));
+    DeviceAccelerationStructure as;
+    as.triangles = cu_triangles;
+    as.nodes = cu_nodes;
+    as.root = root;
+    as.count = count;
+
+    DeviceScene gpu_scene;
+    gpu_scene.attributes = scene.gpu_attributes;
+    gpu_scene.camera = cu_camera->gpu();
+    gpu_scene.light = scene.light;
+    gpu_scene.materials = scene.library.gpu_materials;
+    gpu_scene.textures = scene.library.gpu_textures;
+
+    run("TraceRays", (TraceRays<<<grid_size, block_size>>>(
+                         as, gpu_scene, cu_num_tests->gpu(), args.render_type,
+                         viewCudaSurfaceObject)));
     check(cudaPeekAtLastError());
 
     // unmap buffer object

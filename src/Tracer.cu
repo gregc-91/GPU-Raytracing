@@ -32,8 +32,7 @@ __device__ float4 Sample(Texture& texture, int2 xy, int lod)
 __device__ uchar4 Sample(Texture& texture, float2 uv, int lod)
 {
     float2 coord = fracf(uv) * make_float2(texture.sizes[lod] - 1);
-    int2 icoord =
-        make_int2(coord.x, texture.sizes[lod].y - coord.y - 1);
+    int2 icoord = make_int2(coord.x, texture.sizes[lod].y - coord.y - 1);
 
     if (texture.gpu_mips[lod] == NULL) {
         return make_uchar4(255, 0, 255, 255);
@@ -180,15 +179,14 @@ __device__ bool IntersectRayTrianglePair(TrianglePair& tri, Ray& ray,
     return hitA || hitB;
 }
 
-__device__ bool TraceRay(TrianglePair* triangles, Node* nodes,
-                         Attributes* attributes, Ray& ray,
-                         RayResult& ray_result, unsigned root, unsigned count,
-                         TraceStats& stats, bool debug)
+__device__ bool TraceRay(DeviceAccelerationStructure as, Attributes* attributes,
+                         Ray& ray, RayResult& ray_result, TraceStats& stats,
+                         bool debug)
 {
     bool tri_hit = false;
     unsigned stack_size = 1;
     StackEntry stack[64];
-    stack[0] = {root, count};
+    stack[0] = {as.root, as.count};
 
     while (stack_size) {
         StackEntry entry = stack[--stack_size];
@@ -197,7 +195,7 @@ __device__ bool TraceRay(TrianglePair* triangles, Node* nodes,
         float child_dist;
 
         for (unsigned i = 0; i < entry.count; i++) {
-            Node& node = nodes[entry.index + i];
+            Node& node = as.nodes[entry.index + i];
             if (node.type == ChildType_None) continue;
 
             float dist;
@@ -210,7 +208,7 @@ __device__ bool TraceRay(TrianglePair* triangles, Node* nodes,
                 // for (unsigned j = 0; j < node.count; j++) {
                 stats.tri_tests++;
                 bool hit_tri = IntersectRayTrianglePair(
-                    triangles[node.child], ray, ray_result, node.count > 0);
+                    as.triangles[node.child], ray, ray_result, node.count > 0);
                 tri_hit |= hit_tri;
                 //}
             } else if (hit && num_hits == 0) {
@@ -248,23 +246,22 @@ __device__ bool TraceRay(TrianglePair* triangles, Node* nodes,
     return tri_hit;
 }
 
-__device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
-                                uint32_t root, uint32_t count,
-                                Attributes* attributes, Texture* textures, Ray& ray,
+__device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
+                                DeviceScene scene, Ray& ray,
                                 RayResult& ray_result, Material& mat,
-                                Attributes& attribs, float3 light, float spread,
+                                Attributes& attribs, float spread,
                                 bool use_textures, bool use_shadows)
 {
     float3 light_colour = {1.0f, 0.9f, 0.8f};
-    float3 light_pos = light;
+    float3 light_pos = scene.light;
 
     float3 hit_pos = ray.origin + ray.direction * ray.tmax;
     float3 normal = InterpolateNormals(attribs, ray_result.barycentrics);
 
     float3 light_dir = normalize(light_pos - hit_pos);
 
-    float3 ambient = 0.1f * light_colour;
-    float3 diffuse = 0.9f * max(dot(normal, light_dir), 0.0f) * light_colour;
+    float3 ambient = 0.2f * light_colour;
+    float3 diffuse = 1.0f * max(dot(normal, light_dir), 0.0f) * light_colour;
     float3 specular =
         1.0f *
         pow(max(dot(-ray.direction, reflect(-light_dir, normal)), 0.0),
@@ -276,15 +273,15 @@ __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
     float3 object_specular = mat.specular;
 
     if (use_textures && mat.texture != -1) {
-        Texture& tex = textures[mat.texture];
+        Texture& tex = scene.textures[mat.texture];
         float lod =
             ComputeLOD(ray, ray_result, spread,
-                       triangles[ray_result.primitive_id], attribs, tex);
+                       as.triangles[ray_result.primitive_id], attribs, tex);
         uchar4 smp = BilinearSample(
             tex, InterpolateUVs(attribs, ray_result.barycentrics), lod);
-        object_diffuse.x *= float(smp.x) / 255;
-        object_diffuse.y *= float(smp.y) / 255;
-        object_diffuse.z *= float(smp.z) / 255;
+        object_diffuse.x = float(smp.x) / 255;
+        object_diffuse.y = float(smp.y) / 255;
+        object_diffuse.z = float(smp.z) / 255;
     }
 
     if (use_shadows) {
@@ -296,8 +293,8 @@ __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
         shadow_ray.tmin = 0.001f;
         shadow_ray.tmax = length(light_pos - hit_pos);
 
-        bool hit = TraceRay(triangles, nodes, attributes, shadow_ray,
-                            shadow_result, root, count, shadow_stats, false);
+        bool hit = TraceRay(as, scene.attributes, shadow_ray, shadow_result,
+                            shadow_stats, false);
 
         if (hit) diffuse = make_float3(0.0f);
     }
@@ -309,29 +306,28 @@ __device__ uchar4 AmbientShader(TrianglePair* triangles, Node* nodes,
     return make_uchar4(colour.x * 255, colour.y * 255, colour.z * 255, 255);
 }
 
-__global__ void TraceRays(TrianglePair* triangles, Node* nodes,
-                          Attributes* attributes, Material* materials,
-                          Texture* textures, Camera* camera,
+__global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
                           uint32_t* num_tests, RenderType render_type,
-                          cudaSurfaceObject_t image, unsigned root,
-                          unsigned count, float3 light)
+                          cudaSurfaceObject_t image)
 {
     unsigned x = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned y = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned w = blockDim.x * gridDim.x;
     unsigned h = blockDim.y * gridDim.y;
 
+    Camera& camera = *scene.camera;
+
     float2 coord = make_float2((float)x, (float)y);
     float2 ndc = 2 * ((coord + 0.5f) / make_float2(w, h)) - 1;
     float3 ndc3 = make_float3(ndc, 1);
-    float3 p = (ndc.x * camera->u) + (ndc.y * camera->v) + (ndc3.z * camera->w);
+    float3 p = (ndc.x * camera.u) + (ndc.y * camera.v) + (ndc3.z * camera.w);
     float spread = 2.0f / w;
 
-    float max_depth = camera->max_depth;
+    float max_depth = camera.max_depth;
 
     Ray ray;
     ray.direction = normalize(p);
-    ray.origin = camera->position;
+    ray.origin = camera.position;
     ray.tmin = 0.00001f;
     ray.tmax = max_depth;
 
@@ -339,15 +335,14 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
     ray_result.primitive_id = 0;
     TraceStats stats = {};
     stats.box_tests = 0;
-    bool hit = TraceRay(triangles, nodes, attributes, ray, ray_result, root,
-                        count, stats, false);
+    bool hit = TraceRay(as, scene.attributes, ray, ray_result, stats, false);
     float depth = hit ? ray.tmax : 0.0f;
     atomicAdd(num_tests, stats.box_tests);
 
     uchar4 colour;
-    TrianglePair& pair = triangles[ray_result.primitive_id];
-    Attributes& attribs = attributes[ray_result.primitive_id];
-    Material& mat = materials[attribs.material_id];
+    TrianglePair& pair = as.triangles[ray_result.primitive_id];
+    Attributes& attribs = scene.attributes[ray_result.primitive_id];
+    Material& mat = scene.materials[attribs.material_id];
 
     if (render_type == RenderType::kDepth) {
         colour.x = min(1.0f, depth / max_depth) * 255;
@@ -366,16 +361,15 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
         colour.w = 255;
     } else if (render_type == RenderType::kDiffuse) {
         if (hit) {
-            colour =
-                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
-                              ray_result, materials[attribs.material_id],
-                              attribs, light, spread, false, false);
+            colour = AmbientShader(as, scene, ray, ray_result,
+                                   scene.materials[attribs.material_id],
+                                   attribs, spread, false, false);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
     } else if (render_type == RenderType::kLODs) {
         if (mat.texture != -1) {
-            Texture& texture = textures[mat.texture];
+            Texture& texture = scene.textures[mat.texture];
             float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
             float lod =
                 ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, texture);
@@ -386,10 +380,10 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
     } else if (render_type == RenderType::kTexture) {
         if (hit) {
             if (mat.texture != -1) {
-                Texture& texture = textures[mat.texture];
+                Texture& texture = scene.textures[mat.texture];
                 float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
-                float lod =
-                    ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, texture);
+                float lod = ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs,
+                                       texture);
 
                 colour = BilinearSample(texture, uvs, lod);
             } else {
@@ -403,19 +397,17 @@ __global__ void TraceRays(TrianglePair* triangles, Node* nodes,
         }
     } else if (render_type == RenderType::kTextureLit) {
         if (hit) {
-            colour =
-                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
-                              ray_result, materials[attribs.material_id],
-                              attribs, light, spread, true, false);
+            colour = AmbientShader(as, scene, ray, ray_result,
+                                   scene.materials[attribs.material_id],
+                                   attribs, spread, true, false);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
     } else if (render_type == RenderType::kTextureLitShadows) {
         if (hit) {
-            colour =
-                AmbientShader(triangles, nodes, root, count, attributes, textures, ray,
-                              ray_result, materials[attribs.material_id],
-                              attribs, light, spread, true, true);
+            colour = AmbientShader(as, scene, ray, ray_result,
+                                   scene.materials[attribs.material_id],
+                                   attribs, spread, true, true);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }

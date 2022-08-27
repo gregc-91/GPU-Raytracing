@@ -18,9 +18,6 @@ typedef struct StackEntry {
     unsigned count;
 } StackEntry;
 
-__global__ void TraceRays(TrianglePair* triangles, Node* nodes,
-                          Attributes* attributes, Material* materials,
-                          Texture* textures, Camera* camera,
+__global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
                           uint32_t* num_tests, RenderType render_type,
-                          cudaSurfaceObject_t image, unsigned root,
-                          unsigned count, float3 light);
+                          cudaSurfaceObject_t image);
