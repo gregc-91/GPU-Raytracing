@@ -61,6 +61,21 @@ __device__ uchar4 BilinearSample(Texture& t, float2 uv, int lod)
                        Sample(t, i2, lod) * w2 + Sample(t, i3, lod) * w3);
 }
 
+__device__ uchar4 TrilinearSample(Texture& t, float2 uv, float lod)
+{
+    uint min_lod = floorf(lod);
+    uint max_lod = min_lod+1;
+    min_lod = clamp(min_lod, 0u, t.max_lod);
+    max_lod = clamp(max_lod, 0u, t.max_lod);
+
+    float4 sample1 = make_float4(BilinearSample(t, uv, min_lod));
+    float4 sample2 = make_float4(BilinearSample(t, uv, max_lod));
+
+    float frac = fracf(lod);
+
+    return make_uchar4(sample1 * (1.0f - frac) + sample2 * frac);
+}
+
 __device__ bool IntersectRayAabb(const Node& node, const Ray& ray,
                                  float& distance)
 {
@@ -388,7 +403,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
                 float lod = ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs,
                                        texture);
 
-                colour = BilinearSample(texture, uvs, lod);
+                colour = TrilinearSample(texture, uvs, lod);
             } else {
                 colour.x = mat.diffuse.x * 255;
                 colour.y = mat.diffuse.y * 255;
