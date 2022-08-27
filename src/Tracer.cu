@@ -296,7 +296,10 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
         bool hit = TraceRay(as, scene.attributes, shadow_ray, shadow_result,
                             shadow_stats, false);
 
-        if (hit) diffuse = make_float3(0.0f);
+        if (hit) {
+            diffuse = make_float3(0.0f);
+            specular = make_float3(0.0f);
+        }
     }
 
     float3 colour = diffuse * object_diffuse + ambient * object_ambient +
