@@ -164,6 +164,25 @@ void Library::AddMaterial(const std::string name)
     materials.push_back(Material(name));
 }
 
+int32_t Library::AddTexture(const std::string name)
+{
+    int2 dims = {0, 0};
+    int channels = 0;
+
+    // Check if the texture is already loaded
+    if (GetTextureId(name) == -1) {
+        printf("Loading %s\n", name.c_str());
+        uchar4* mip0 = (uchar4*)stbi_load(name.c_str(), &dims.x,
+                                            &dims.y, &channels, 4);
+        name_to_tex[name] = textures.size();
+        textures.push_back(Texture(name, mip0, dims));
+        textures.back().GenerateLODs();
+        return textures.size()-1;
+    } else {
+        return GetTextureId(name);
+    }
+}
+
 int32_t Library::GetMaterialId(const std::string name)
 {
     auto it = name_to_mat.find(name);
@@ -240,23 +259,17 @@ Library LoadMTLFromFile(const std::string filename)
             assert(tokens.size() > 1);
 
             // Load the diffuse texture
-            int2 dims = {0, 0};
-            int channels = 0;
             std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
-            Material& material = library.materials.back();
+            int32_t texture_index = library.AddTexture(texture_name);
+            library.materials.back().texture = texture_index;
+            
+        } else if (tokens[0] == "bump") {
+            assert(tokens.size() > 1);
 
-            // Check if the texture is already loaded
-            if (library.GetTextureId(texture_name) == -1) {
-                printf("Loading %s\n", texture_name.c_str());
-                uchar4* mip0 = (uchar4*)stbi_load(texture_name.c_str(), &dims.x,
-                                                  &dims.y, &channels, 4);
-                material.texture = library.textures.size();
-                library.name_to_tex[texture_name] = library.textures.size();
-                library.textures.push_back(Texture(texture_name, mip0, dims));
-                library.textures.back().GenerateLODs();
-            } else {
-                material.texture = library.GetTextureId(texture_name);
-            }
+            std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
+            int32_t texture_index = library.AddTexture(texture_name);
+            library.materials.back().bump = texture_index;
+
         } else if (tokens[0] == "Ns") {
             assert(tokens.size() > 1);
             library.materials.back().specular_exp = std::stof(tokens[1]);

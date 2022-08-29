@@ -92,6 +92,7 @@ struct Material {
     float3 specular;
     float specular_exp;
     int32_t texture;
+    int32_t bump;
 
     Material() : name("") {}
     Material(std::string s) : name(s)
@@ -101,6 +102,7 @@ struct Material {
         specular = make_float3(0.0f);
         specular_exp = 0.0f;
         texture = -1;
+        bump = -1;
     }
     Material(const Material& other)
         : name(other.name),
@@ -108,7 +110,8 @@ struct Material {
           diffuse(other.diffuse),
           specular(other.specular),
           specular_exp(other.specular_exp),
-          texture(other.texture)
+          texture(other.texture),
+          bump(other.bump)
     {
     }
     ~Material();
@@ -127,6 +130,7 @@ struct Library {
     Texture* gpu_textures;
 
     void AddMaterial(std::string name);
+    int32_t AddTexture(const std::string name);
     int32_t GetMaterialId(std::string name);
     Material& GetMaterial(std::string name);
     Material& GetMaterial(uint32_t i);

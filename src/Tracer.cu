@@ -7,6 +7,10 @@ struct RayResult {
     float2 barycentrics;
 };
 
+struct float3x3 {
+    float3 row[3];
+};
+
 __device__ float2 InterpolateUVs(Attributes& attributes, float2 barycentrics)
 {
     return attributes.uv[0] * (1 - barycentrics.x - barycentrics.y) +
@@ -20,6 +24,22 @@ __device__ float3 InterpolateNormals(Attributes& attributes,
     return attributes.normal[0] * (1 - barycentrics.x - barycentrics.y) +
            attributes.normal[1] * barycentrics.x +
            attributes.normal[2] * barycentrics.y;
+}
+
+__device__ float3x3 TangentMatrix(Triangle& triangle, Attributes& attributes)
+{
+    float3 e1 = triangle.v1 - triangle.v0;
+    float3 e2 = triangle.v2 - triangle.v0;
+    float2 duv1 = attributes.uv[1] - attributes.uv[0];
+    float2 duv2 = attributes.uv[2] - attributes.uv[0];
+
+    float f = 1.0f / (duv1.x * duv2.y - duv1.y * duv2.x);
+
+    float3 normal = normalize(cross(e2, e1));
+    float3 tangent = normalize(f * (e1 * duv2.y - e2 * duv1.y));
+    float3 bitangent = normalize(f * (e2 * duv1.x - e1 * duv2.x));
+
+    return {normalize(tangent), normalize(bitangent), normalize(normal)};
 }
 
 __device__ float4 Sample(Texture& texture, int2 xy, int lod)
@@ -64,7 +84,7 @@ __device__ uchar4 BilinearSample(Texture& t, float2 uv, int lod)
 __device__ uchar4 TrilinearSample(Texture& t, float2 uv, float lod)
 {
     uint min_lod = floorf(lod);
-    uint max_lod = min_lod+1;
+    uint max_lod = min_lod + 1;
     min_lod = clamp(min_lod, 0u, t.max_lod);
     max_lod = clamp(max_lod, 0u, t.max_lod);
 
@@ -74,6 +94,32 @@ __device__ uchar4 TrilinearSample(Texture& t, float2 uv, float lod)
     float frac = fracf(lod);
 
     return make_uchar4(sample1 * (1.0f - frac) + sample2 * frac);
+}
+
+__device__ float3 Bump2Normal(Texture& texture, float3x3 tbn, float2 uv,
+                              float lod)
+{
+    // Work out how much to offset the samples
+    float2 step = make_float2(pow(lod, 2.0f)) / make_float2(texture.sizes[0]);
+
+    // Take 3 samples of the bump map
+    uchar a = TrilinearSample(texture, uv - step * 0.5f, lod).x;
+    uchar b =
+        TrilinearSample(texture, uv + make_float2(step.x * 0.5f, 0), lod).x;
+    uchar c =
+        TrilinearSample(texture, uv + make_float2(0, step.y * 0.5f), lod).x;
+
+    // Compute the gradients
+    float2 grad = make_float2(float(b) - a, float(c) - a);
+
+    // Cross product the gradients to get the bump normal
+    float3 normal = cross(make_float3(1, 0, grad.x / 256.0f),
+                          make_float3(0, 1, grad.y / 256.0f));
+
+    // Transform the bump normal into the triangle normal space
+    normal = tbn.row[0] * normal + tbn.row[1] * normal + tbn.row[2] * normal;
+
+    return normal;
 }
 
 __device__ bool IntersectRayAabb(const Node& node, const Ray& ray,
@@ -265,13 +311,23 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
                                 DeviceScene scene, Ray& ray,
                                 RayResult& ray_result, Material& mat,
                                 Attributes& attribs, float spread,
-                                bool use_textures, bool use_shadows)
+                                bool use_textures, bool use_shadows,
+                                bool use_bump)
 {
     float3 light_colour = {1.0f, 0.9f, 0.8f};
     float3 light_pos = scene.light;
 
     float3 hit_pos = ray.origin + ray.direction * ray.tmax;
     float3 normal = InterpolateNormals(attribs, ray_result.barycentrics);
+    /*if (use_bump && mat.bump != -1) {
+        TrianglePair& pair = as.triangles[ray_result.primitive_id];
+        Triangle tri(pair.v0, pair.v1, pair.v2);
+        Texture& bump = scene.textures[mat.bump];
+        float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
+        float lod = ComputeLOD(ray, ray_result, spread, pair, attribs, bump);
+        float3x3 tbn = TangentMatrix(tri, attribs);
+        normal = Bump2Normal(bump, tbn, uvs, lod);
+    }*/
 
     float3 light_dir = normalize(light_pos - hit_pos);
 
@@ -381,7 +437,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
         if (hit) {
             colour = AmbientShader(as, scene, ray, ray_result,
                                    scene.materials[attribs.material_id],
-                                   attribs, spread, false, false);
+                                   attribs, spread, false, false, false);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
@@ -403,7 +459,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
                 float lod = ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs,
                                        texture);
 
-                colour = TrilinearSample(texture, uvs, lod);
+                colour = BilinearSample(texture, uvs, lod);
             } else {
                 colour.x = mat.diffuse.x * 255;
                 colour.y = mat.diffuse.y * 255;
@@ -417,7 +473,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
         if (hit) {
             colour = AmbientShader(as, scene, ray, ray_result,
                                    scene.materials[attribs.material_id],
-                                   attribs, spread, true, false);
+                                   attribs, spread, true, false, true);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
@@ -425,7 +481,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
         if (hit) {
             colour = AmbientShader(as, scene, ray, ray_result,
                                    scene.materials[attribs.material_id],
-                                   attribs, spread, true, true);
+                                   attribs, spread, true, true, false);
         } else {
             colour = make_uchar4(0, 0, 0, 255);
         }
