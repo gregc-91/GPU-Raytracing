@@ -162,6 +162,9 @@ void Trace(TrianglePair* cu_triangles, Node* cu_nodes,
     gpu_scene.light = scene.light;
     gpu_scene.materials = scene.library.gpu_materials;
     gpu_scene.textures = scene.library.gpu_textures;
+    gpu_scene.num_attributes = scene.attributes.size();
+    gpu_scene.num_materials = scene.library.materials.size();
+    gpu_scene.num_textures = scene.library.textures.size();
 
     run("TraceRays", (TraceRays<<<grid_size, block_size>>>(
                          as, gpu_scene, cu_num_tests->gpu(), args.render_type,

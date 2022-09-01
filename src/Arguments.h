@@ -16,12 +16,13 @@ enum RenderType {
     kDepth = 0,
     kBoxtests = 1,
     kTriangleTests = 2,
-    kLODs = 3,
-    kDiffuse = 4,
-    kTexture = 5,
-    kTextureLit = 6,
-    kTextureLitShadows = 7,
-    kCount = 8
+    kMaterialId = 3,
+    kLODs = 4,
+    kDiffuse = 5,
+    kTexture = 6,
+    kTextureLit = 7,
+    kTextureLitShadows = 8,
+    kCount = 9
 };
 
 struct Arguments {

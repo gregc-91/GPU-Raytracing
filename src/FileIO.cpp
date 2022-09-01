@@ -172,12 +172,12 @@ int32_t Library::AddTexture(const std::string name)
     // Check if the texture is already loaded
     if (GetTextureId(name) == -1) {
         printf("Loading %s\n", name.c_str());
-        uchar4* mip0 = (uchar4*)stbi_load(name.c_str(), &dims.x,
-                                            &dims.y, &channels, 4);
+        uchar4* mip0 =
+            (uchar4*)stbi_load(name.c_str(), &dims.x, &dims.y, &channels, 4);
         name_to_tex[name] = textures.size();
         textures.push_back(Texture(name, mip0, dims));
         textures.back().GenerateLODs();
-        return textures.size()-1;
+        return textures.size() - 1;
     } else {
         return GetTextureId(name);
     }
@@ -262,13 +262,20 @@ Library LoadMTLFromFile(const std::string filename)
             std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
             int32_t texture_index = library.AddTexture(texture_name);
             library.materials.back().texture = texture_index;
-            
+
         } else if (tokens[0] == "bump") {
             assert(tokens.size() > 1);
 
             std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
             int32_t texture_index = library.AddTexture(texture_name);
             library.materials.back().bump = texture_index;
+
+        } else if (tokens[0] == "map_Disp") {
+            assert(tokens.size() > 1);
+
+            std::string texture_name(BaseDirectory(filename) + "/" + tokens[1]);
+            int32_t texture_index = library.AddTexture(texture_name);
+            library.materials.back().disp = texture_index;
 
         } else if (tokens[0] == "Ns") {
             assert(tokens.size() > 1);

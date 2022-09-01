@@ -71,6 +71,11 @@ inline __host__ __device__ float2 make_float2(uint2 a)
     return make_float2(float(a.x), float(a.y));
 }
 
+inline __host__ __device__ uchar3 make_uchar3(float3 a)
+{
+    return make_uchar3(uint8_t(a.x), uint8_t(a.y), uint8_t(a.z));
+}
+
 inline __host__ __device__ uchar4 make_uchar4(uint a)
 {
     return make_uchar4(uint8_t(a), uint8_t(a), uint8_t(a), uint8_t(a));

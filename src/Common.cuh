@@ -93,6 +93,7 @@ struct Material {
     float specular_exp;
     int32_t texture;
     int32_t bump;
+    int32_t disp;
 
     Material() : name("") {}
     Material(std::string s) : name(s)
@@ -103,6 +104,7 @@ struct Material {
         specular_exp = 0.0f;
         texture = -1;
         bump = -1;
+        disp = -1;
     }
     Material(const Material& other)
         : name(other.name),
@@ -111,7 +113,8 @@ struct Material {
           specular(other.specular),
           specular_exp(other.specular_exp),
           texture(other.texture),
-          bump(other.bump)
+          bump(other.bump),
+          disp(other.disp)
     {
     }
     ~Material();
@@ -308,6 +311,9 @@ struct DeviceScene {
     Texture* textures;
     Camera* camera;
     float3 light;
+    uint32_t num_attributes;
+    uint32_t num_materials;
+    uint32_t num_textures;
 };
 
 #pragma warning(disable : 26812)
