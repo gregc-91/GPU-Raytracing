@@ -4,6 +4,7 @@
 
 struct RayResult {
     uint32_t primitive_id;
+    uint32_t pair_id;
     float2 barycentrics;
 };
 
@@ -228,7 +229,8 @@ __device__ float ComputeLOD(Ray& ray, RayResult& ray_result, float spread,
 }
 
 __device__ bool IntersectRayTriangle(Triangle& tri, Ray& ray,
-                                     RayResult& ray_result, uint32_t prim_id)
+                                     RayResult& ray_result, uint32_t pair_id,
+                                     uint32_t prim_id)
 {
     const float epsilon = 0.000000001f;
 
@@ -258,20 +260,22 @@ __device__ bool IntersectRayTriangle(Triangle& tri, Ray& ray,
 
     ray.tmax = t;
     ray_result.primitive_id = prim_id;
+    ray_result.pair_id = pair_id;
     ray_result.barycentrics = make_float2(u, v);
     return true;
 }
 
 __device__ bool IntersectRayTrianglePair(TrianglePair& tri, Ray& ray,
-                                         RayResult& ray_result, bool pair)
+                                         RayResult& ray_result,
+                                         uint32_t pair_id, bool pair)
 {
     Triangle tri_a(tri.v0, tri.v1, tri.v2);
     Triangle tri_b(tri.v2, tri.v1, tri.v3);
-    bool hitA =
-        IntersectRayTriangle(tri_a, ray, ray_result, tri.primitive_id_0);
-    bool hitB =
-        pair ? IntersectRayTriangle(tri_b, ray, ray_result, tri.primitive_id_1)
-             : false;
+    bool hitA = IntersectRayTriangle(tri_a, ray, ray_result, pair_id,
+                                     tri.primitive_id_0);
+    bool hitB = pair ? IntersectRayTriangle(tri_b, ray, ray_result, pair_id,
+                                            tri.primitive_id_1)
+                     : false;
     return hitA || hitB;
 }
 
@@ -304,7 +308,8 @@ __device__ bool TraceRay(DeviceAccelerationStructure as, Attributes* attributes,
                 // for (unsigned j = 0; j < node.count; j++) {
                 stats.tri_tests++;
                 bool hit_tri = IntersectRayTrianglePair(
-                    as.triangles[node.child], ray, ray_result, node.count > 0);
+                    as.triangles[node.child], ray, ray_result, node.child,
+                    node.count > 0);
                 tri_hit |= hit_tri;
                 //}
             } else if (hit && num_hits == 0) {
@@ -355,7 +360,7 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
     float3 hit_pos = ray.origin + ray.direction * ray.tmax;
     float3 normal = InterpolateNormals(attribs, ray_result.barycentrics);
     if (use_bump && mat.disp != -1) {
-        TrianglePair& pair = as.triangles[ray_result.primitive_id];
+        TrianglePair& pair = as.triangles[ray_result.pair_id];
         Triangle tri(pair.v0, pair.v1, pair.v2);
         Texture& disp = scene.textures[mat.disp];
         float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
@@ -398,7 +403,7 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
         Texture& tex = scene.textures[mat.texture];
         float lod =
             ComputeLOD(ray, ray_result, spread,
-                       as.triangles[ray_result.primitive_id], attribs, tex);
+                       as.triangles[ray_result.pair_id], attribs, tex);
         uchar4 smp = BilinearSample(
             tex, InterpolateUVs(attribs, ray_result.barycentrics), lod);
         object_diffuse.x = float(smp.x) / 255;
@@ -458,6 +463,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
 
     RayResult ray_result;
     ray_result.primitive_id = 0;
+    ray_result.pair_id = 0;
     TraceStats stats = {};
     stats.box_tests = 0;
     bool hit = TraceRay(as, scene.attributes, ray, ray_result, stats, false);
@@ -465,7 +471,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
     atomicAdd(num_tests, stats.box_tests);
 
     uchar4 colour;
-    TrianglePair& pair = as.triangles[ray_result.primitive_id];
+    TrianglePair& pair = as.triangles[ray_result.pair_id];
     Attributes& attribs = scene.attributes[ray_result.primitive_id];
     Material& mat = scene.materials[attribs.material_id];
 
