@@ -150,7 +150,7 @@ __device__ static TrianglePair CreateTrianglePair(const Triangle* a,
                                                   Rotations r)
 {
     if (b == NULL) {
-        return TrianglePair(a->v0, a->v1, a->v2, a->v2, a_id, 0);
+        return TrianglePair(a->v0, a->v1, a->v2, a->v2, a_id, 0, r.rot_a, r.rot_b);
     }
     Triangle a_rotated = RotateTriangle(*a, r.rot_a);
 
@@ -158,7 +158,7 @@ __device__ static TrianglePair CreateTrianglePair(const Triangle* a,
                                        r.rot_b == 2   ? b->v0
                                        : r.rot_b == 1 ? b->v1
                                                       : b->v2,
-                                       a_id, b_id);
+                                       a_id, b_id, r.rot_a, r.rot_b);
 
     return result;
 }
@@ -293,9 +293,9 @@ __global__ void Setup(Triangle* triangles, TrianglePair* triangles_out,
                 CreateTrianglePair(a, b, tri_id, tri_id + 1, r);
         } else {
             AssignVolatile(aabbs[idx], a_aabb);
-            triangles_out[idx + 0] = CreateTrianglePair(a, NULL, tri_id, 0, r);
+            triangles_out[idx + 0] = CreateTrianglePair(a, NULL, tri_id, 0, {0,0});
             triangles_out[idx + 1] =
-                CreateTrianglePair(b, NULL, tri_id + 1, 0, r);
+                CreateTrianglePair(b, NULL, tri_id + 1, 0, {0,0});
         }
         // aabbs[tri_id] = merge ? p_aabb : a_aabb;
         ids[idx].id = idx;
@@ -440,9 +440,9 @@ __global__ void SetupPairSplits(Triangle* triangles,
                 CreateTrianglePair(a, b, tri_id, tri_id + 1, r);
         } else {
             triangles_out[tri_block_index + 0] =
-                CreateTrianglePair(a, NULL, tri_id, 0, r);
+                CreateTrianglePair(a, NULL, tri_id, 0, {0,0});
             triangles_out[tri_block_index + 1] =
-                CreateTrianglePair(b, NULL, tri_id + 1, 0, r);
+                CreateTrianglePair(b, NULL, tri_id + 1, 0, {0,0});
         }
 
         // Loop for one tri, two tris, or a pair

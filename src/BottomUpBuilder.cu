@@ -136,7 +136,7 @@ __device__ static TrianglePair CreateTrianglePair(const float3* a,
                                                   Rotations r)
 {
     if (b == NULL) {
-        return TrianglePair(a[0], a[1], a[2], a[2], a_id, 0);
+        return TrianglePair(a[0], a[1], a[2], a[2], a_id, 0, r.rot_a, r.rot_b);
     }
     Triangle a_rotated = RotateTriangle(a, r.rot_a);
 
@@ -144,7 +144,7 @@ __device__ static TrianglePair CreateTrianglePair(const float3* a,
                                        r.rot_b == 2   ? b[0]
                                        : r.rot_b == 1 ? b[1]
                                                       : b[2],
-                                       a_id, b_id);
+                                       a_id, b_id, r.rot_a, r.rot_b);
 
     return result;
 }

@@ -4,7 +4,7 @@
 
 struct RayResult {
     uint32_t primitive_id;
-    uint32_t pair_id;
+    uint32_t tri_id;
     float2 barycentrics;
 };
 
@@ -52,6 +52,33 @@ __device__ float3 InterpolateNormals(Attributes& attributes,
     return attributes.normal[0] * (1 - barycentrics.x - barycentrics.y) +
            attributes.normal[1] * barycentrics.x +
            attributes.normal[2] * barycentrics.y;
+}
+
+__device__ Attributes RotateAttributes(Attributes& in, bool second_tri, ushort2 rotations)
+{
+    if (!second_tri) {
+        switch (rotations.x) {
+            case 0:
+                return in;
+            case 1:
+                return Attributes{{in.normal[2], in.normal[0], in.normal[1]}, {in.uv[2], in.uv[0], in.uv[1]}, in.material_id};
+            case 2:
+                return Attributes{{in.normal[1], in.normal[2], in.normal[0]}, {in.uv[1], in.uv[2], in.uv[0]}, in.material_id};
+            default:
+                return in;
+        }
+    } else {
+        switch (rotations.y) {
+            case 0:
+                return in;
+            case 1:
+                return Attributes{{in.normal[2], in.normal[0], in.normal[1]}, {in.uv[2], in.uv[0], in.uv[1]}, in.material_id};
+            case 2:
+                return Attributes{{in.normal[1], in.normal[2], in.normal[0]}, {in.uv[1], in.uv[2], in.uv[0]}, in.material_id};
+            default:
+                return in;
+        }
+    }
 }
 
 __device__ float3x3 TangentMatrix(Triangle& triangle, Attributes& attributes)
@@ -208,11 +235,9 @@ __device__ float4 RayTriangleGradients(Triangle& tri, Ray& ray, float spread)
 }
 
 __device__ float ComputeLOD(Ray& ray, RayResult& ray_result, float spread,
-                            TrianglePair& tri, Attributes& attribs,
-                            Texture& tex)
+                            Triangle& tri, Attributes& attribs, Texture& tex)
 {
-    Triangle t(tri.v0, tri.v1, tri.v2);
-    float4 spread_barys = RayTriangleGradients(t, ray, spread);
+    float4 spread_barys = RayTriangleGradients(tri, ray, spread);
 
     float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
     float2 uvs_x =
@@ -229,7 +254,7 @@ __device__ float ComputeLOD(Ray& ray, RayResult& ray_result, float spread,
 }
 
 __device__ bool IntersectRayTriangle(Triangle& tri, Ray& ray,
-                                     RayResult& ray_result, uint32_t pair_id,
+                                     RayResult& ray_result, uint32_t tri_id,
                                      uint32_t prim_id)
 {
     const float epsilon = 0.000000001f;
@@ -260,7 +285,7 @@ __device__ bool IntersectRayTriangle(Triangle& tri, Ray& ray,
 
     ray.tmax = t;
     ray_result.primitive_id = prim_id;
-    ray_result.pair_id = pair_id;
+    ray_result.tri_id = tri_id;
     ray_result.barycentrics = make_float2(u, v);
     return true;
 }
@@ -271,11 +296,12 @@ __device__ bool IntersectRayTrianglePair(TrianglePair& tri, Ray& ray,
 {
     Triangle tri_a(tri.v0, tri.v1, tri.v2);
     Triangle tri_b(tri.v2, tri.v1, tri.v3);
-    bool hitA = IntersectRayTriangle(tri_a, ray, ray_result, pair_id,
+    bool hitA = IntersectRayTriangle(tri_a, ray, ray_result, (pair_id << 1),
                                      tri.primitive_id_0);
-    bool hitB = pair ? IntersectRayTriangle(tri_b, ray, ray_result, pair_id,
-                                            tri.primitive_id_1)
-                     : false;
+    bool hitB =
+        pair ? IntersectRayTriangle(tri_b, ray, ray_result, (pair_id << 1) + 1,
+                                    tri.primitive_id_1)
+             : false;
     return hitA || hitB;
 }
 
@@ -360,11 +386,13 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
     float3 hit_pos = ray.origin + ray.direction * ray.tmax;
     float3 normal = InterpolateNormals(attribs, ray_result.barycentrics);
     if (use_bump && mat.disp != -1) {
-        TrianglePair& pair = as.triangles[ray_result.pair_id];
-        Triangle tri(pair.v0, pair.v1, pair.v2);
+        bool second_tri = ray_result.tri_id & 1;
+        TrianglePair& pair = as.triangles[ray_result.tri_id >> 1];
+        Triangle tri = second_tri ? Triangle(pair.v2, pair.v1, pair.v3)
+                                  : Triangle(pair.v0, pair.v1, pair.v2);
         Texture& disp = scene.textures[mat.disp];
         float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
-        float lod = ComputeLOD(ray, ray_result, spread, pair, attribs, disp);
+        float lod = ComputeLOD(ray, ray_result, spread, tri, attribs, disp);
         float3x3 tbn = TangentMatrix(tri, attribs);
         uchar4 disp_smp = TrilinearSample(disp, uvs, lod);
         normal = make_float3(disp_smp.x / 255.0f, disp_smp.y / 255.0f,
@@ -376,11 +404,13 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
                                        dot(tbn.row[2], normal)));
 
     } else if (use_bump && mat.bump != -1) {
-        TrianglePair& pair = as.triangles[ray_result.primitive_id];
-        Triangle tri(pair.v0, pair.v1, pair.v2);
+        bool second_tri = ray_result.tri_id & 1;
+        TrianglePair& pair = as.triangles[ray_result.tri_id >> 1];
+        Triangle tri = second_tri ? Triangle(pair.v2, pair.v1, pair.v3)
+                                  : Triangle(pair.v0, pair.v1, pair.v2);
         Texture& bump = scene.textures[mat.bump];
         float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
-        float lod = ComputeLOD(ray, ray_result, spread, pair, attribs, bump);
+        float lod = ComputeLOD(ray, ray_result, spread, tri, attribs, bump);
         float3x3 tbn = TangentMatrix(tri, attribs);
         normal = Bump2Normal(bump, tbn, uvs, lod);
     }
@@ -400,10 +430,12 @@ __device__ uchar4 AmbientShader(DeviceAccelerationStructure as,
     float3 object_specular = mat.specular;
 
     if (use_textures && mat.texture != -1) {
+        bool second_tri = ray_result.tri_id & 1;
+        TrianglePair& pair = as.triangles[ray_result.tri_id >> 1];
+        Triangle tri = second_tri ? Triangle(pair.v2, pair.v1, pair.v3)
+                                  : Triangle(pair.v0, pair.v1, pair.v2);
         Texture& tex = scene.textures[mat.texture];
-        float lod =
-            ComputeLOD(ray, ray_result, spread,
-                       as.triangles[ray_result.pair_id], attribs, tex);
+        float lod = ComputeLOD(ray, ray_result, spread, tri, attribs, tex);
         uchar4 smp = BilinearSample(
             tex, InterpolateUVs(attribs, ray_result.barycentrics), lod);
         object_diffuse.x = float(smp.x) / 255;
@@ -463,7 +495,7 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
 
     RayResult ray_result;
     ray_result.primitive_id = 0;
-    ray_result.pair_id = 0;
+    ray_result.tri_id = 0;
     TraceStats stats = {};
     stats.box_tests = 0;
     bool hit = TraceRay(as, scene.attributes, ray, ray_result, stats, false);
@@ -471,8 +503,9 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
     atomicAdd(num_tests, stats.box_tests);
 
     uchar4 colour;
-    TrianglePair& pair = as.triangles[ray_result.pair_id];
-    Attributes& attribs = scene.attributes[ray_result.primitive_id];
+    bool second_tri = ray_result.tri_id & 1;
+    TrianglePair& pair = as.triangles[ray_result.tri_id >> 1];
+    Attributes attribs = RotateAttributes(scene.attributes[ray_result.primitive_id], second_tri, pair.rotations);
     Material& mat = scene.materials[attribs.material_id];
 
     if (render_type == RenderType::kDepth) {
@@ -509,10 +542,13 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
         }
     } else if (render_type == RenderType::kLODs) {
         if (mat.texture != -1 && hit) {
+            bool second_tri = ray_result.tri_id & 1;
+            Triangle tri = second_tri ? Triangle(pair.v2, pair.v1, pair.v3)
+                                      : Triangle(pair.v0, pair.v1, pair.v2);
             Texture& texture = scene.textures[mat.texture];
             float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
             float lod =
-                ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs, texture);
+                ComputeLOD(ray, ray_result, 2.0f / w, tri, attribs, texture);
             colour = make_uchar4((unsigned char)(int(lod) * 20));
         } else {
             colour = make_uchar4(255, 0, 255, 255);
@@ -520,9 +556,12 @@ __global__ void TraceRays(DeviceAccelerationStructure as, DeviceScene scene,
     } else if (render_type == RenderType::kTexture) {
         if (hit) {
             if (mat.texture != -1) {
+                bool second_tri = ray_result.tri_id & 1;
+                Triangle tri = second_tri ? Triangle(pair.v2, pair.v1, pair.v3)
+                                          : Triangle(pair.v0, pair.v1, pair.v2);
                 Texture& texture = scene.textures[mat.texture];
                 float2 uvs = InterpolateUVs(attribs, ray_result.barycentrics);
-                float lod = ComputeLOD(ray, ray_result, 2.0f / w, pair, attribs,
+                float lod = ComputeLOD(ray, ray_result, 2.0f / w, tri, attribs,
                                        texture);
 
                 colour = TrilinearSample(texture, uvs, lod);

@@ -24,8 +24,8 @@ typedef unsigned char uchar;
 
 // Struct to store the rotations for each triangle to make a pair
 struct Rotations {
-    int rot_a;
-    int rot_b;
+    ushort rot_a;
+    ushort rot_b;
 };
 
 typedef enum ChildType {
@@ -159,24 +159,26 @@ struct TrianglePair {
     float3 v1;
     uint32_t primitive_id_1;
     float3 v2;
-    float pad2;
+    ushort2 rotations;
     float3 v3;
     float pad3;
 
     __host__ __device__ TrianglePair() {}
 
     __host__ __device__ TrianglePair(const float3& v0_, const float3& v1_,
-                                     const float3& v2_, uint32_t id)
+                                     const float3& v2_, uint32_t id, uint16_t r)
     {
         v0 = v0_;
         v1 = v1_;
         v2 = v2_;
         primitive_id_0 = id;
+        rotations.x = r;
     }
 
     __host__ __device__ TrianglePair(const float3& v0_, const float3& v1_,
                                      const float3& v2_, const float3& v3_,
-                                     uint32_t id_0, uint32_t id_1)
+                                     uint32_t id_0, uint32_t id_1,
+                                     uint16_t r_0, uint16_t r_1)
     {
         v0 = v0_;
         v1 = v1_;
@@ -184,6 +186,8 @@ struct TrianglePair {
         v3 = v3_;
         primitive_id_0 = id_0;
         primitive_id_1 = id_1;
+        rotations.x = r_0;
+        rotations.y = r_1;
     }
 };
 
