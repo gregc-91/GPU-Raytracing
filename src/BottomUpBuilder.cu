@@ -1,52 +1,11 @@
 #include <stdio.h>
 
 #include "BottomUpBuilder.cuh"
+#include "DeviceUtils.cuh"
 #include "Multiblock.cuh"
+#include "Pairing.cuh"
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
-
-__device__ static float OrderedIntToFloat(int i)
-{
-    return __int_as_float((i >= 0) ? i : i ^ 0x7FFFFFFF);
-}
-
-__device__ static float3 OrderedIntToFloat(float3 a)
-{
-    return make_float3(OrderedIntToFloat(__float_as_int(a.x)),
-                       OrderedIntToFloat(__float_as_int(a.y)),
-                       OrderedIntToFloat(__float_as_int(a.z)));
-}
-
-__device__ static AABB OrderedIntToFloat(AABB a)
-{
-    return {OrderedIntToFloat(a.min), OrderedIntToFloat(a.max)};
-}
-
-__device__ static float atomicMin(float* address, float val)
-{
-    int* address_as_i = (int*)address;
-    int old = *address_as_i, assumed;
-    do {
-        assumed = old;
-        old =
-            ::atomicCAS(address_as_i, assumed,
-                        __float_as_int(::fminf(val, __int_as_float(assumed))));
-    } while (assumed != old);
-    return __int_as_float(old);
-}
-
-__device__ static float atomicMax(float* address, float val)
-{
-    int* address_as_i = (int*)address;
-    int old = *address_as_i, assumed;
-    do {
-        assumed = old;
-        old =
-            ::atomicCAS(address_as_i, assumed,
-                        __float_as_int(::fmaxf(val, __int_as_float(assumed))));
-    } while (assumed != old);
-    return __int_as_float(old);
-}
 
 // Expands a 10-bit integer into 30 bits
 // by inserting 2 zeros after each bit.
@@ -70,83 +29,6 @@ __device__ unsigned int Morton3D(float x, float y, float z)
     unsigned int yy = ExpandBits((unsigned int)y);
     unsigned int zz = ExpandBits((unsigned int)z);
     return xx * 4 + yy * 2 + zz;
-}
-
-__device__ static bool Equal(const float3& a, const float3& b)
-{
-    return a.x == b.x && a.y == b.y && a.z == b.z;
-}
-
-// Check if triangle t shares an edge with edge (a->b)
-// Returns how many steps to
-//  t such that v0==t.v0 && v1==t.v1, if there is a shared edge
-// Returns -1 if there is no shared edge
-__device__ int FindSharedEdge(const float3& a, const float3& b, const float3* t)
-{
-    if (Equal(a, t[0]) && Equal(b, t[1])) return 0;
-    if (Equal(a, t[1]) && Equal(b, t[2])) return 2;
-    if (Equal(a, t[2]) && Equal(b, t[0])) return 1;
-    return -1;
-}
-
-// Checks if two triangles are able to form a triangle pair
-__device__ bool CanFormTrianglePair(const float3* a, const float3* b,
-                                    Rotations& r)
-{
-    int t0_rotate = 3;
-    int t1_rotate = -1;
-    for (uint32_t u = 2, v = 0; v < 3; u = v, v++) {
-        t1_rotate = FindSharedEdge(a[v], a[u], b);
-        t0_rotate--;
-        if (t1_rotate != -1) break;
-    }
-    if (t1_rotate == -1) return false;
-
-    r.rot_a = t0_rotate;
-    r.rot_b = t1_rotate;
-
-    return true;
-}
-
-// Checks if the combined surface area is too large
-// Creating large boxes is unlikely to give a quality result
-__device__ static bool ShouldFormTrianglePair(const AABB& a, const AABB& b,
-                                              const AABB& p)
-{
-    return sa(p) * 0.7f < sa(a) + sa(b);
-}
-
-__device__ Triangle RotateTriangle(const float3* a, int rot)
-{
-    switch (rot) {
-        case 0:
-            return Triangle(a[0], a[1], a[2]);
-        case 1:
-            return Triangle(a[2], a[0], a[1]);
-        case 2:
-            return Triangle(a[1], a[2], a[0]);
-        default:
-            return Triangle(a[0], a[1], a[2]);
-    }
-}
-
-__device__ static TrianglePair CreateTrianglePair(const float3* a,
-                                                  const float3* b,
-                                                  uint32_t a_id, uint32_t b_id,
-                                                  Rotations r)
-{
-    if (b == NULL) {
-        return TrianglePair(a[0], a[1], a[2], a[2], a_id, 0, r.rot_a, r.rot_b);
-    }
-    Triangle a_rotated = RotateTriangle(a, r.rot_a);
-
-    TrianglePair result = TrianglePair(a_rotated.v0, a_rotated.v1, a_rotated.v2,
-                                       r.rot_b == 2   ? b[0]
-                                       : r.rot_b == 1 ? b[1]
-                                                      : b[2],
-                                       a_id, b_id, r.rot_a, r.rot_b);
-
-    return result;
 }
 
 __device__ int cpl(unsigned* codes, unsigned i, unsigned j)
@@ -242,12 +124,11 @@ __global__ void GenerateMortonCodesPairs(unsigned* codes, unsigned* values,
     if (tid >= count) return;
 
     bool second_valid = (tid + 1) < count;
-    float3* a = &vertices[tid * 3];
-    float3* b = second_valid ? &vertices[(tid + 1) * 3] : &vertices[tid * 3];
-    AABB a_aabb = {fminf(fminf(a[0], a[1]), a[1]),
-                   fmaxf(fmaxf(a[0], a[1]), a[2])};
-    AABB b_aabb = {fminf(fminf(b[0], b[1]), b[2]),
-                   fmaxf(fmaxf(b[0], b[1]), b[2])};
+    Triangle a = Triangle(&vertices[tid * 3]);
+    Triangle b = second_valid ? Triangle(&vertices[(tid + 1) * 3])
+                              : Triangle(&vertices[tid * 3]);
+    AABB a_aabb = AABB(a);
+    AABB b_aabb = AABB(b);
     AABB c_aabb = Combine(a_aabb, b_aabb);
 
     // Check if they have a shared edge
@@ -260,8 +141,8 @@ __global__ void GenerateMortonCodesPairs(unsigned* codes, unsigned* values,
     unsigned idx = atomicAdd(num_leaves, num_valid);
 
     // Compute the centres
-    float3 centre = (a[0] + a[1] + a[2]) / 3.0f;
-    float3 centre2 = (b[0] + b[1] + b[2]) / 3.0f;
+    float3 centre = a.Centre();
+    float3 centre2 = b.Centre();
     if (merge) centre = (centre + centre2) * 0.5f;
 
     AABB scene_aabb = OrderedIntToFloat(*p_aabb);
@@ -412,18 +293,18 @@ __global__ void GenerateTriangles(unsigned* sorted_indices, float3* vertices,
     bool is_pair = sorted_indices[gid] >> 31;
     unsigned index = sorted_indices[gid] & 0x7FFFFFFF;
 
-    float3* a = &vertices[index * 3];
-    float3* b = &vertices[(index + 1) * 3];
+    Triangle a(&vertices[index * 3]);
+    Triangle b(&vertices[(index + 1) * 3]);
 
     Rotations r;
     TrianglePair result;
     if (is_pair) {
         CanFormTrianglePair(a, b, r);
-        result = CreateTrianglePair(a, b, index, index + 1, r);
+        result = CreateTrianglePair(&a, &b, index, index + 1, r);
     } else {
-        result.v0 = a[0];
-        result.v1 = a[1];
-        result.v2 = a[2];
+        result.v0 = a.v0;
+        result.v1 = a.v1;
+        result.v2 = a.v2;
         result.v3 = result.v2;
     }
 

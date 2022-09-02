@@ -2,6 +2,7 @@
 
 #include "SharedTaskBuilder.cuh"
 #include "helper_math.h"
+#include "DeviceUtils.cuh"
 
 #ifndef FLT_MAX
 #define FLT_MAX 3.40282347E+38F
@@ -38,17 +39,6 @@ __shared__ PrimitiveID* global_prim_ids;
 __device__ static float get(float3& f, int i)
 {
     return i == 0 ? f.x : i == 1 ? f.y : f.z;
-}
-
-__device__ static int FloatToOrderedInt(float f)
-{
-    int i = __float_as_int(f);
-    return (i >= 0) ? i : i ^ 0x7FFFFFFF;
-}
-
-__device__ static float OrderedIntToFloat(int i)
-{
-    return __int_as_float((i >= 0) ? i : i ^ 0x7FFFFFFF);
 }
 
 __device__ static bool Equal(const float3& a, const float3& b)

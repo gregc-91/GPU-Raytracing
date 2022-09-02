@@ -191,6 +191,52 @@ struct TrianglePair {
     }
 };
 
+typedef struct Triangle {
+    float3 v0;
+    float3 v1;
+    float3 v2;
+
+    Triangle()
+    {
+        v0.x = 0;
+        v0.y = 0;
+        v0.z = 0;
+        v1.x = 0;
+        v1.y = 0;
+        v1.z = 0;
+        v2.x = 0;
+        v2.y = 0;
+        v2.z = 0;
+    }
+
+    __host__ __device__ Triangle(float3 a, float3 b, float3 c)
+        : v0(a), v1(b), v2(c)
+    {
+    }
+
+    __host__ __device__ Triangle(float3* abc) : v0(abc[0]), v1(abc[1]), v2(abc[2])
+    {
+    }
+
+    Triangle(float ax, float ay, float az, float bx, float by, float bz,
+             float cx, float cy, float cz)
+    {
+        v0.x = ax;
+        v0.y = ay;
+        v0.z = az;
+        v1.x = bx;
+        v1.y = by;
+        v1.z = bz;
+        v2.x = cx;
+        v2.y = cy;
+        v2.z = cz;
+    }
+
+    __host__ __device__ float3 Centre() {
+        return (v0 + v1 + v2) / 3.0f;
+    }
+} Triangle;
+
 struct AABB {
     float3 min;
     float3 max;
@@ -207,6 +253,12 @@ struct AABB {
     {
         min = minmax[0];
         max = minmax[1];
+    }
+
+    __host__ __device__ AABB(const Triangle t)
+    {
+        min = fminf(fminf(t.v0, t.v1), t.v2);
+        max = fmaxf(fmaxf(t.v0, t.v1), t.v2);
     }
 
     __host__ __device__ AABB Intersection(const AABB& other)
@@ -263,44 +315,6 @@ struct Bin {
     AABB p_aabb;
     unsigned count;
 };
-
-typedef struct Triangle {
-    float3 v0;
-    float3 v1;
-    float3 v2;
-
-    Triangle()
-    {
-        v0.x = 0;
-        v0.y = 0;
-        v0.z = 0;
-        v1.x = 0;
-        v1.y = 0;
-        v1.z = 0;
-        v2.x = 0;
-        v2.y = 0;
-        v2.z = 0;
-    }
-
-    __host__ __device__ Triangle(float3 a, float3 b, float3 c)
-        : v0(a), v1(b), v2(c)
-    {
-    }
-
-    Triangle(float ax, float ay, float az, float bx, float by, float bz,
-             float cx, float cy, float cz)
-    {
-        v0.x = ax;
-        v0.y = ay;
-        v0.z = az;
-        v1.x = bx;
-        v1.y = by;
-        v1.z = bz;
-        v2.x = cx;
-        v2.y = cy;
-        v2.z = cz;
-    }
-} Triangle;
 
 struct DeviceAccelerationStructure {
     TrianglePair* triangles;
