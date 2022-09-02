@@ -22,6 +22,11 @@ typedef unsigned int uint;
 typedef unsigned long ulong;
 typedef unsigned char uchar;
 
+__device__ inline bool Equal(const float3& a, const float3& b)
+{
+    return a.x == b.x && a.y == b.y && a.z == b.z;
+}
+
 // Struct to store the rotations for each triangle to make a pair
 struct Rotations {
     ushort rot_a;
@@ -273,6 +278,17 @@ struct AABB {
 
     __host__ __device__ float3 Centre() { return (min + max) * 0.5f; }
 };
+
+__device__ inline bool Equal(const AABB& a, const AABB& b)
+{
+    return Equal(a.min, b.min) && Equal(a.max, b.max);
+}
+
+__device__ inline void Reset(AABB& a)
+{
+    a.min = make_float3(FLT_MAX);
+    a.max = make_float3(-FLT_MAX);
+}
 
 __device__ inline float sa(const AABB& a)
 {

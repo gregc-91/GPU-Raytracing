@@ -6,11 +6,6 @@ __device__ inline float3 Get(const Triangle& t, int i)
     return i == 0 ? t.v0 : i == 1 ? t.v1 : t.v2;
 }
 
-__device__ inline bool Equal(const float3& a, const float3& b)
-{
-    return a.x == b.x && a.y == b.y && a.z == b.z;
-}
-
 __device__ inline Triangle RotateTriangle(const Triangle& a, int rot)
 {
     switch (rot) {

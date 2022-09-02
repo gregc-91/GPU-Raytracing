@@ -41,22 +41,6 @@ __device__ static float get(float3& f, int i)
     return i == 0 ? f.x : i == 1 ? f.y : f.z;
 }
 
-__device__ static bool Equal(const float3& a, const float3& b)
-{
-    return a.x == b.x && a.y == b.y && a.z == b.z;
-}
-
-__device__ static bool Equal(const AABB& a, const AABB& b)
-{
-    return Equal(a.min, b.min) && Equal(a.max, b.max);
-}
-
-__device__ static void Reset(AABB& a)
-{
-    a.min = make_float3(FLT_MAX);
-    a.max = make_float3(-FLT_MAX);
-}
-
 __device__ static Bin Combine(const Bin& a, const Bin& b)
 {
     Bin r;

@@ -27,12 +27,6 @@ __device__ static float Get(float3& f, int i)
     return i == 0 ? f.x : i == 1 ? f.y : f.z;
 }
 
-__device__ static void Reset(AABB& a)
-{
-    a.min = make_float3(FLT_MAX);
-    a.max = make_float3(-FLT_MAX);
-}
-
 __device__ static Bin Combine(const Bin& a, const Bin& b)
 {
     Bin r;
